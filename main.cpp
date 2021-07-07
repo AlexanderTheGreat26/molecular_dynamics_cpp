@@ -1,3 +1,11 @@
+/* Program of 3d-modeling gas behavior in unit volume via molecular dynamics method.
+ * Interaction of particles modeling via Lennard-Jones potential.
+ * Coordinates and velocities defines via Verlet integration.
+ * Initial coordinates and velocities directions distributed evenly.
+ * By vector in comments it should be understood std::vector<std::tuple<>>,
+ * by coordinates, velocities and accelerations it should be understood std::tuple contains projections on coordinate
+ * axes. */
+
 #include <iostream>
 #include <cmath>
 #include <random>
@@ -51,7 +59,7 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
 
 std::vector<coord> Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
 
-void velocities_equation (coord& v, coord& a_current, coord& a_next);
+void velocities_equations (coord& v, coord& a_current, coord& a_next);
 
 void coordinate_equations (coord& q, coord& v, coord& a);
 
@@ -82,6 +90,7 @@ double scalar_square (const Tuple& t) {
     return scalar_square_impl(t, std::make_index_sequence<size>{});
 }
 
+// Used for circuit stability check.
 double energy_of_system (std::vector<coord>& velocities) {
     double E = 0;
     for (int i = 0; i < N; ++i)
@@ -98,34 +107,36 @@ void periodic_borders (std::tuple<Tp...>& t) {
         periodic_borders<Is + 1>(t);
 }
 
-
+/* Well, using it this way is a bad way. Better to write templates, but it is necessary to change the architecture of
+ * the program. So two functions bellow just difference equations of Verlet integration.
+ * Input: vectors of coordinates (velocities) in tuple. Change by reference. */
 void coordinate_equations (coord& q, coord& v, coord& a) {
     std::get<0>(q) += std::get<0>(v)*dt + std::get<0>(a)*std::pow(dt, 2)/2.0;
     std::get<1>(q) += std::get<1>(v)*dt + std::get<1>(a)*std::pow(dt, 2)/2.0;
     std::get<2>(q) += std::get<2>(v)*dt + std::get<2>(a)*std::pow(dt, 2)/2.0;
 }
 
-
-void velocities_equation (coord& v, coord& a_current, coord& a_next) {
+void velocities_equations (coord& v, coord& a_current, coord& a_next) {
     std::get<0>(v) += (std::get<0>(a_next) + std::get<0>(a_current)) / 2.0 * dt;
     std::get<1>(v) += (std::get<1>(a_next) + std::get<1>(a_current)) / 2.0 * dt;
     std::get<2>(v) += (std::get<2>(a_next) + std::get<2>(a_current)) / 2.0 * dt;
 }
 
-
+// Input: vectors coordinates and velocities. Output: vector of coordinates after one time-step.
 std::vector<coord> Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current;
     for (int i = 0; i < N; ++i) {
         a_current = total_particle_acceleration(q);
         coordinate_equations(q[i], v[i], a_current[i]);
         a_next = total_particle_acceleration(q);
-        velocities_equation(v[i], a_current[i], a_next[i]);
+        velocities_equations(v[i], a_current[i], a_next[i]);
         periodic_borders(q[i]);
         std::cout << i << std::endl;
     }
     momentum_exchange(q, v);
     return q;
 }
+
 
 template<typename T, size_t... Is>
 auto distance_impl(T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
@@ -138,7 +149,8 @@ double distance (const Tuple& t, const Tuple& t1) {
     return distance_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
 }
 
-
+// If two particles impact they exchange momentums of each other.
+// Input: vector coordinates, vector velocities. Last changes by reference.
 void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& velocities) {
     for (int i = 0; i < N; ++i)
         for (int j = 0; j < N; ++j)
@@ -150,6 +162,9 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
 }
 
 
+/* Returns vector of accelerations for particles. It's the most time-consuming operation, so it computing in parallels
+ * via omp.h. I don't know what more effective: using it in parallel or just using -O3 flag.
+ * Input: vector of coordinates. */
 std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
     std::vector<coord> acceleration;
 #pragma omp parallel
@@ -178,12 +193,13 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
 }
 
 
+// Returns force of two-particles interaction via Lennard-Jones potential. Input distance between two particles.
 double single_force (double R) {
     return 24.0 * Theta / R * (2.0 * pow(sigma / R, 12.0) - pow(sigma / R, 6.0));
 }
 
 
-
+// Returns velocity of particle in projections to coordinate axes. (tuple)
 template<size_t Is = 0, typename... Tp>
 coord default_velocities (std::tuple<Tp...> t) {
     std::get<Is>(t) *= V_init;
@@ -192,6 +208,7 @@ coord default_velocities (std::tuple<Tp...> t) {
     return t;
 }
 
+// Returns vector of velocities for every particles.
 std::vector<coord> default_velocities () {
     std::vector<coord> directions;
     std::uniform_real_distribution<> dis(0.0, 1.0);
@@ -212,7 +229,7 @@ std::vector<coord> default_velocities () {
     return directions;
 }
 
-
+// Returns initial coordinates of particles evenly distributed over the volume.
 std::vector<coord> default_coordinates () {
     std::vector<coord> coordinates;
     std::uniform_real_distribution<> dis(left_border, right_border);
@@ -224,7 +241,3 @@ std::vector<coord> default_coordinates () {
     }
     return coordinates;
 }
-
-
-
-
