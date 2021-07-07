@@ -12,18 +12,23 @@
 #include <vector>
 #include <utility>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <tuple>
 #include <array>
 #include <algorithm>
+#include <iterator>
+#include <memory>
+#include <stdexcept>
 #include "omp.h"
 
 
 // Program constants:
-const int N = 1e3; //Number of particles
+const int N = 10; //Number of particles
 const double dt = 1.0e-15; // Time-step
 const double left_border = -0.5;
 const double right_border = 0.5;
+bool realtime = false;
 
 
 // Fundamental constants
@@ -57,7 +62,7 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles);
 
 void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& velocities);
 
-std::vector<coord> Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
+void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
 
 void velocities_equations (coord& v, coord& a_current, coord& a_next);
 
@@ -65,19 +70,118 @@ void coordinate_equations (coord& q, coord& v, coord& a);
 
 double energy_of_system (std::vector<coord>& velocities);
 
+void data_file (std::string& data_type, std::vector<coord>& data, double& t);
+
+void data_files (std::string& name, std::vector<coord>& data, double& t);
+
+void clear_data (std::string& file_name);
+
+std::string exec (std::string str);
+
+void plot (std::string name, double min, double max, int number_of_points, int& steps);
+
+
 
 int main () {
-    auto coordinates = std::move(default_coordinates());
-    auto velocities = std::move(default_velocities());
+    std::vector<coord> coordinates = std::move(default_coordinates());
+    std::vector<coord> velocities = std::move(default_velocities());
     double E, E_init = N * m*std::pow(V_init, 2)/2.0;
+    double t = 0;
+    std::string name = "Ar_coordinates";
+    if (!realtime) {
+        std::string path = std::move(exec("rm -rf trajectories && mkdir trajectories && cd trajectories && echo $PWD"));
+        name = path + '/' + name;
+    }
+    int step = 0;
+    data_files (name, coordinates, t);
     do {
         Verlet_integration(coordinates, velocities);
+        std::cout << std::get<0>(velocities[0]) << std::endl;
         E = energy_of_system(velocities);
         std::cout << E - E_init << std::endl;
-    } while (std::abs(E - E_init) < 1.0e-10);
+        t += dt;
+        data_files (name, coordinates, t);
+        ++step;
+    } while (std::abs(E - E_init) < 1.0e-10 && t < 3.0*dt);
+    plot(name, left_border, right_border, N, step);
     return 0;
 }
 
+void plot (std::string name, double min, double max, int number_of_points, int& steps) {
+    std::string range = "[" + std::to_string(min) + ":" + std::to_string(max) + "]";
+    FILE *gp = popen("gnuplot  -persist", "w");
+    if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
+    std::vector<std::string> stuff = {"set term gif animate delay 100",
+                                      "set output \'" + name + ".gif\'",
+                                      "set multiplot",
+                                      "set grid xtics ytics ztics",
+                                      "set xrange " + range,
+                                      "set yrange " + range,
+                                      "set zrange " + range,
+                                      "set key off",
+                                      "set ticslevel 0",
+                                      "set border 4095",
+                                      "do for [i = 0:" + std::to_string(number_of_points-1) + "] {" ,
+                                            "do for [j = 0:" + std::to_string(steps-1) + "] {",
+                                                "splot \'" + name + ".\'.i using 1:2:3 index j pt 7",
+                                      "} \ }",
+                                      "q"};
+    for (const auto& it : stuff)
+        fprintf(gp, "%s\n", it.c_str());
+    pclose(gp);
+}
+
+
+std::string exec (std::string str) {
+    const char* cmd = str.c_str();
+    std::array<char, 128> buffer;
+    std::string result;
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+    if (!pipe) throw std::runtime_error("popen() failed!");
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
+        result += buffer.data();
+    result = result.substr(0, result.length()-1);
+    return result;
+}
+
+
+void clear_data (std::string& file_name) {
+    std::ofstream fout;
+    fout.open(file_name, std::ofstream::out | std::ofstream::trunc);
+    fout.close();
+}
+
+
+template<typename T, size_t... Is>
+std::string tuple_to_string_impl(T const& t, std::index_sequence<Is...>) {
+    return (((std::to_string(std::get<Is>(t)) + '\t') + ...));
+}
+
+template <class Tuple>
+std::string tuple_to_string (const Tuple& t) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return tuple_to_string_impl(t, std::make_index_sequence<size>{});
+}
+
+void data_file (std::string& data_type, std::vector<coord>& data, double& t) {
+    std::ofstream fout;
+    data_type += ".txt";
+    fout.open(data_type, std::ios::app);
+    for (auto & i : data)
+        fout << tuple_to_string(i) << t << std::endl;
+    fout << std::endl;
+    fout.close();
+}
+
+
+void data_files (std::string& name, std::vector<coord>& data, double& t) {
+    for (int i = 0; i < data.size(); ++i) {
+        std::ofstream fout;
+        fout.open(name + '.' + std::to_string(i), std::ios::app);
+        fout << tuple_to_string(data[i]) << t << std::endl << std::endl;
+        fout.close();
+    }
+}
 
 template<typename T, size_t... Is>
 auto scalar_square_impl(T const& t, std::index_sequence<Is...>) {
@@ -123,7 +227,7 @@ void velocities_equations (coord& v, coord& a_current, coord& a_next) {
 }
 
 // Input: vectors coordinates and velocities. Output: vector of coordinates after one time-step.
-std::vector<coord> Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
+void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current;
     for (int i = 0; i < N; ++i) {
         a_current = total_particle_acceleration(q);
@@ -131,10 +235,9 @@ std::vector<coord> Verlet_integration (std::vector<coord>& q, std::vector<coord>
         a_next = total_particle_acceleration(q);
         velocities_equations(v[i], a_current[i], a_next[i]);
         periodic_borders(q[i]);
-        std::cout << i << std::endl;
+        //std::cout << i << std::endl;
     }
     momentum_exchange(q, v);
-    return q;
 }
 
 
