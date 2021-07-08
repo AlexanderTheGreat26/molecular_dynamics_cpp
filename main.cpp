@@ -24,10 +24,10 @@
 
 
 // Program constants:
-const int N = 10; //Number of particles
+const int N = 1000; //Number of particles
 const double dt = 1.0e-15; // Time-step
-const double left_border = -0.5;
-const double right_border = 0.5;
+const double left_border = -0.5e-20;
+const double right_border = 0.5e-20;
 bool realtime = false;
 
 
@@ -70,7 +70,7 @@ void coordinate_equations (coord& q, coord& v, coord& a);
 
 double energy_of_system (std::vector<coord>& velocities);
 
-void data_file (std::string& data_type, std::vector<coord>& data, double& t);
+void data_file (std::string data_type, std::vector<coord>& data, double& t);
 
 void data_files (std::string& name, std::vector<coord>& data, double& t);
 
@@ -102,7 +102,7 @@ int main () {
         t += dt;
         data_files (name, coordinates, t);
         ++step;
-    } while (std::abs(E - E_init) < 1.0e-10 && t < 3.0*dt);
+    } while (std::abs(E - E_init) < 1.0e-10 && t < 2.0*dt);
     plot(name, left_border, right_border, N, step);
     return 0;
 }
@@ -163,7 +163,7 @@ std::string tuple_to_string (const Tuple& t) {
     return tuple_to_string_impl(t, std::make_index_sequence<size>{});
 }
 
-void data_file (std::string& data_type, std::vector<coord>& data, double& t) {
+void data_file (std::string data_type, std::vector<coord>& data, double& t) {
     std::ofstream fout;
     data_type += ".txt";
     fout.open(data_type, std::ios::app);
@@ -231,11 +231,13 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current;
     for (int i = 0; i < N; ++i) {
         a_current = total_particle_acceleration(q);
+        double debug_t = i;
+        std::cout << std::get<0>(a_current[i]) << std::endl;
+        data_file("accelerations"+std::to_string(i), a_current, debug_t);
         coordinate_equations(q[i], v[i], a_current[i]);
         a_next = total_particle_acceleration(q);
         velocities_equations(v[i], a_current[i], a_next[i]);
         periodic_borders(q[i]);
-        //std::cout << i << std::endl;
     }
     momentum_exchange(q, v);
 }
@@ -268,6 +270,22 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
 /* Returns vector of accelerations for particles. It's the most time-consuming operation, so it computing in parallels
  * via omp.h. I don't know what more effective: using it in parallel or just using -O3 flag.
  * Input: vector of coordinates. */
+/*std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
+    std::vector<coord> acceleration;
+    double a_x, a_y, a_z;
+    for (int i = 0; i < N; ++i) {
+        a_x = a_y = a_z = 0;
+        for (int j = 0; j < N; ++j)
+            if (i != j && distance(particles[i], particles[j]) <= 3.0 * R_0) {
+                a_x += single_force(std::get<0>(particles[i]) - std::get<0>(particles[j])) / m;
+                a_y += single_force(std::get<1>(particles[i]) - std::get<1>(particles[j])) / m;
+                a_z += single_force(std::get<2>(particles[i]) - std::get<2>(particles[j])) / m;
+            }
+        acceleration.emplace_back(std::make_tuple(a_x, a_y, a_z));
+        }
+    return acceleration;
+
+}*/
 std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
     std::vector<coord> acceleration;
 #pragma omp parallel
@@ -283,7 +301,7 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
                     a_y += single_force(std::get<1>(particles[i]) - std::get<1>(particles[j])) / m;
                     a_z += single_force(std::get<2>(particles[i]) - std::get<2>(particles[j])) / m;
                 }
-            acceleration_private.emplace_back(std::move(std::make_tuple(a_x, a_y, a_z)));
+            acceleration_private.emplace_back(std::make_tuple(a_x, a_y, a_z));
         }
 
 #pragma omp for schedule(static) ordered
