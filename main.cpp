@@ -24,8 +24,8 @@
 
 
 // Program constants:
-const int N = 1000; //Number of particles
-const double dt = 1.0e-15; // Time-step
+const int N = 1e3; //Number of particles
+const double dt = 1.0e-10; // Time-step
 const double left_border = -0.5;
 const double right_border = 0.5;
 bool realtime = false;
@@ -125,7 +125,7 @@ void plot (std::string name, double min, double max, int number_of_points, int& 
                                       "set border 4095",
                                       "do for [i = 0:" + std::to_string(number_of_points-1) + "] {" ,
                                             "do for [j = 0:" + std::to_string(steps-1) + "] {",
-                                                "splot \'" + name + ".\'.i using 1:2:3 index j pt 7",
+                                                "splot \'" + name + ".\'.i using 1:2:3 index j w linespoints pt 7,/",
                                       "} \ }",
                                       "q"};
     for (const auto& it : stuff)
@@ -237,6 +237,7 @@ void periodic_borders (std::tuple<Tp...>& t) {
  * Input: vectors of coordinates (velocities) in tuple. Change by reference. */
 void coordinate_equations (coord& q, coord& v, coord& a) {
     std::get<0>(q) += std::get<0>(v)*dt + std::get<0>(a)*std::pow(dt, 2)/2.0;
+    std::cout << std::get<0>(q) << std::endl;
     std::get<1>(q) += std::get<1>(v)*dt + std::get<1>(a)*std::pow(dt, 2)/2.0;
     std::get<2>(q) += std::get<2>(v)*dt + std::get<2>(a)*std::pow(dt, 2)/2.0;
 }
@@ -252,8 +253,8 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current;
     for (int i = 0; i < N; ++i) {
         a_current = total_particle_acceleration(q);
-        //double debug_t = i;
-        //data_file("accelerations"+std::to_string(i), a_current, debug_t);
+        double debug_t = i;
+        data_file("accelerations"+std::to_string(i), a_current, debug_t);
         coordinate_equations(q[i], v[i], a_current[i]);
         a_next = total_particle_acceleration(q);
         if (!is_same(a_current, a_next))
@@ -280,7 +281,7 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
 /* Returns vector of accelerations for particles. It's the most time-consuming operation, so it computing in parallels
  * via omp.h. I don't know what more effective: using it in parallel or just using -O3 flag.
  * Input: vector of coordinates. */
-/*std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
+std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
     std::vector<coord> acceleration;
     double a_x, a_y, a_z;
     for (int i = 0; i < N; ++i) {
@@ -295,8 +296,8 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
         }
     return acceleration;
 
-}*/
-std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
+}
+/*std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
     std::vector<coord> acceleration;
 #pragma omp parallel
     {
@@ -321,7 +322,7 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
         }
     }
     return acceleration;
-}
+}*/
 
 
 // Returns force of two-particles interaction via Lennard-Jones potential. Input distance between two particles.
