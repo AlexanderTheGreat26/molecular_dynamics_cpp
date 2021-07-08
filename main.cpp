@@ -26,8 +26,8 @@
 // Program constants:
 const int N = 1000; //Number of particles
 const double dt = 1.0e-15; // Time-step
-const double left_border = -0.5e-20;
-const double right_border = 0.5e-20;
+const double left_border = -0.5;
+const double right_border = 0.5;
 bool realtime = false;
 
 
@@ -67,6 +67,8 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
 void velocities_equations (coord& v, coord& a_current, coord& a_next);
 
 void coordinate_equations (coord& q, coord& v, coord& a);
+
+bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2);
 
 double energy_of_system (std::vector<coord>& velocities);
 
@@ -203,6 +205,25 @@ double energy_of_system (std::vector<coord>& velocities) {
 }
 
 
+template<typename T, size_t... Is>
+auto distance_impl(T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+    return (std::sqrt((std::pow(std::get<Is>(t) - std::get<Is>(t1), 2) + ...)));
+}
+
+template <class Tuple>
+double distance (const Tuple& t, const Tuple& t1) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return distance_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
+}
+
+// Function returns true, if vectors of tuples are same. Estimates with error of computer representation of doubles.
+bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2) {
+    double sum = 0;
+    for (int i = 0; i < a_1.size(); ++i)
+        sum += distance(a_1[i], a_2[i]);
+    return sum < 1.0e-15;
+}
+
 template<size_t Is = 0, typename... Tp>
 void periodic_borders (std::tuple<Tp...>& t) {
     if (std::abs(std::get<Is>(t)) >= right_border)
@@ -225,34 +246,23 @@ void velocities_equations (coord& v, coord& a_current, coord& a_next) {
     std::get<1>(v) += (std::get<1>(a_next) + std::get<1>(a_current)) / 2.0 * dt;
     std::get<2>(v) += (std::get<2>(a_next) + std::get<2>(a_current)) / 2.0 * dt;
 }
-
+// !!! coordinates must changes anyway.
 // Input: vectors coordinates and velocities. Output: vector of coordinates after one time-step.
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current;
     for (int i = 0; i < N; ++i) {
         a_current = total_particle_acceleration(q);
-        double debug_t = i;
-        std::cout << std::get<0>(a_current[i]) << std::endl;
-        data_file("accelerations"+std::to_string(i), a_current, debug_t);
+        //double debug_t = i;
+        //data_file("accelerations"+std::to_string(i), a_current, debug_t);
         coordinate_equations(q[i], v[i], a_current[i]);
         a_next = total_particle_acceleration(q);
-        velocities_equations(v[i], a_current[i], a_next[i]);
+        if (!is_same(a_current, a_next))
+            velocities_equations(v[i], a_current[i], a_next[i]);
         periodic_borders(q[i]);
     }
     momentum_exchange(q, v);
 }
 
-
-template<typename T, size_t... Is>
-auto distance_impl(T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
-    return (std::sqrt((std::pow(std::get<Is>(t) - std::get<Is>(t1), 2) + ...)));
-}
-
-template <class Tuple>
-double distance (const Tuple& t, const Tuple& t1) {
-    constexpr auto size = std::tuple_size<Tuple>{};
-    return distance_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
-}
 
 // If two particles impact they exchange momentums of each other.
 // Input: vector coordinates, vector velocities. Last changes by reference.
