@@ -68,6 +68,8 @@ void velocities_equations (coord& v, coord& a_current, coord& a_next);
 
 void coordinate_equations (coord& q, coord& v, coord& a);
 
+bool is_equal (double a, double b);
+
 bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2);
 
 double energy_of_system (std::vector<coord>& velocities);
@@ -104,7 +106,7 @@ int main () {
         t += dt;
         data_files (name, coordinates, t);
         ++step;
-    } while (std::abs(E - E_init) < 1.0e-10 && t < 2.0*dt);
+    } while (/*is_equal(E, E_init) &&*/ t < 2.0*dt);
     plot(name, left_border, right_border, N, step);
     return 0;
 }
@@ -205,28 +207,32 @@ double energy_of_system (std::vector<coord>& velocities) {
 }
 
 
+bool is_equal (double a, double b) {
+    return std::fabs(a - b) < std::numeric_limits<double>::epsilon();
+}
+
 template<typename T, size_t... Is>
-auto distance_impl(T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
-    return (std::sqrt((std::pow(std::get<Is>(t) - std::get<Is>(t1), 2) + ...)));
+auto equal_impl(T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+    return ((is_equal(std::get<Is>(t), std::get<Is>(t1))) & ...);
 }
 
 template <class Tuple>
-double distance (const Tuple& t, const Tuple& t1) {
+bool equal_tuples (const Tuple& t, const Tuple& t1) {
     constexpr auto size = std::tuple_size<Tuple>{};
-    return distance_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
+    return equal_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
 }
 
 // Function returns true, if vectors of tuples are same. Estimates with error of computer representation of doubles.
 bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2) {
-    double sum = 0;
+    bool ans = true;
     for (int i = 0; i < a_1.size(); ++i)
-        sum += distance(a_1[i], a_2[i]);
-    return sum < 1.0e-15;
+        ans &= equal_tuples(a_1[i], a_2[i]);
+    return ans;
 }
 
 template<size_t Is = 0, typename... Tp>
 void periodic_borders (std::tuple<Tp...>& t) {
-    if (std::abs(std::get<Is>(t)) >= right_border)
+    if (std::fabs(std::get<Is>(t)) >= right_border)
         std::get<Is>(t) = -std::get<Is>(t);
     if constexpr(Is + 1 != sizeof...(Tp))
         periodic_borders<Is + 1>(t);
@@ -264,6 +270,18 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     momentum_exchange(q, v);
 }
 
+
+
+template<typename T, size_t... Is>
+auto distance_impl(T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+    return (std::sqrt((std::pow(std::get<Is>(t) - std::get<Is>(t1), 2) + ...)));
+}
+
+template <class Tuple>
+double distance (const Tuple& t, const Tuple& t1) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return distance_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
+}
 
 // If two particles impact they exchange momentums of each other.
 // Input: vector coordinates, vector velocities. Last changes by reference.
