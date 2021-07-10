@@ -108,7 +108,7 @@ int main () {
         Verlet_integration(coordinates, velocities);
         //std::cout << std::get<0>(velocities[0]) << std::endl;
         E = energy_of_system(velocities);
-        std::cout << E - E_init << std::endl;
+        std::cout << E - E_init << '\t' << t << std::endl;
         t += dt;
         data_files (name, coordinates, t);
         ++step;
@@ -233,8 +233,11 @@ bool equal_tuples (const Tuple& t, const Tuple& t1) {
 // Function returns true, if vectors of tuples are same. Estimates with error of computer representation of doubles.
 bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2) {
     bool ans = true;
-    for (int i = 0; i < a_1.size(); ++i)
+    int i = 0;
+    do {
         ans &= equal_tuples(a_1[i], a_2[i]);
+        ++i;
+    } while (ans && i < N);
     return ans;
 }
 
