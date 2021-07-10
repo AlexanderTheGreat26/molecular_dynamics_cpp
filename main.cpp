@@ -25,7 +25,7 @@
 
 // Program constants:
 const int N = 1e3; //Number of particles
-const double dt = 1.0e-10; // Time-step
+const double dt = 1.0e-8; // Time-step
 const double left_border = -0.5;
 const double right_border = 0.5;
 bool realtime = false;
@@ -84,7 +84,13 @@ std::string exec (std::string str);
 
 void plot (std::string name, double min, double max, int number_of_points, int& steps);
 
-
+template<size_t Is = 0, typename... Tp>
+void debug_tuple_output (std::tuple<Tp...>& t) {
+    std::cout << std::endl;
+    std::cout << std::get<Is>(t) << '\t';
+    if constexpr(Is + 1 != sizeof...(Tp))
+        debug_tuple_output<Is + 1>(t);
+}
 
 int main () {
     std::vector<coord> coordinates = std::move(default_coordinates());
@@ -106,10 +112,12 @@ int main () {
         t += dt;
         data_files (name, coordinates, t);
         ++step;
-    } while (/*is_equal(E, E_init) &&*/ t < 2.0*dt);
+    } while (/*is_equal(E, E_init) &&*/ t < 5.0*dt);
     plot(name, left_border, right_border, N, step);
     return 0;
 }
+
+
 
 void plot (std::string name, double min, double max, int number_of_points, int& steps) {
     std::string range = "[" + std::to_string(min) + ":" + std::to_string(max) + "]";
@@ -155,15 +163,15 @@ void clear_data (std::string& file_name) {
     fout.close();
 }
 
-
+// REFACTOR OTHERS LIKE THIS!
 template<typename T, size_t... Is>
 std::string tuple_to_string_impl(T const& t, std::index_sequence<Is...>) {
     return (((std::to_string(std::get<Is>(t)) + '\t') + ...));
 }
 
-template <class Tuple>
-std::string tuple_to_string (const Tuple& t) {
-    constexpr auto size = std::tuple_size<Tuple>{};
+template <class coord>
+std::string tuple_to_string (const coord& t) {
+    constexpr auto size = std::tuple_size<coord>{};
     return tuple_to_string_impl(t, std::make_index_sequence<size>{});
 }
 
@@ -212,7 +220,7 @@ bool is_equal (double a, double b) {
 }
 
 template<typename T, size_t... Is>
-auto equal_impl(T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+auto equal_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
     return ((is_equal(std::get<Is>(t), std::get<Is>(t1))) & ...);
 }
 
@@ -242,8 +250,9 @@ void periodic_borders (std::tuple<Tp...>& t) {
  * the program. So two functions bellow just difference equations of Verlet integration.
  * Input: vectors of coordinates (velocities) in tuple. Change by reference. */
 void coordinate_equations (coord& q, coord& v, coord& a) {
+    debug_tuple_output(v);
+    std::cout << std::endl;
     std::get<0>(q) += std::get<0>(v)*dt + std::get<0>(a)*std::pow(dt, 2)/2.0;
-    std::cout << std::get<0>(q) << std::endl;
     std::get<1>(q) += std::get<1>(v)*dt + std::get<1>(a)*std::pow(dt, 2)/2.0;
     std::get<2>(q) += std::get<2>(v)*dt + std::get<2>(a)*std::pow(dt, 2)/2.0;
 }
@@ -253,7 +262,7 @@ void velocities_equations (coord& v, coord& a_current, coord& a_next) {
     std::get<1>(v) += (std::get<1>(a_next) + std::get<1>(a_current)) / 2.0 * dt;
     std::get<2>(v) += (std::get<2>(a_next) + std::get<2>(a_current)) / 2.0 * dt;
 }
-// !!! coordinates must changes anyway.
+
 // Input: vectors coordinates and velocities. Output: vector of coordinates after one time-step.
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current;
@@ -263,7 +272,7 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
         data_file("accelerations"+std::to_string(i), a_current, debug_t);
         coordinate_equations(q[i], v[i], a_current[i]);
         a_next = total_particle_acceleration(q);
-        if (!is_same(a_current, a_next))
+        //if (!is_same(a_current, a_next))
             velocities_equations(v[i], a_current[i], a_next[i]);
         periodic_borders(q[i]);
     }
@@ -273,7 +282,7 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
 
 
 template<typename T, size_t... Is>
-auto distance_impl(T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+auto distance_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
     return (std::sqrt((std::pow(std::get<Is>(t) - std::get<Is>(t1), 2) + ...)));
 }
 
@@ -349,18 +358,14 @@ double single_force (double R) {
 }
 
 
-// Returns velocity of particle in projections to coordinate axes. (tuple)
-template<size_t Is = 0, typename... Tp>
-coord default_velocities (std::tuple<Tp...> t) {
-    std::get<Is>(t) *= V_init;
-    if constexpr(Is + 1 != sizeof...(Tp))
-        default_velocities<Is + 1>(t);
-    return t;
+coord velocity_direction (double& cos_psi, double& mu, double& cos_gamma) {
+    return std::make_tuple(cos_psi*V_init, mu*V_init, cos_gamma*V_init);
 }
 
 // Returns vector of velocities for every particles.
 std::vector<coord> default_velocities () {
-    std::vector<coord> directions;
+    std::vector<coord> velocities;
+    coord direction;
     std::uniform_real_distribution<> dis(0.0, 1.0);
     for (int i = 0; i < N; ++i) {
         double mu, a, b, cos_psi, cos_gamma, d = 10;
@@ -374,9 +379,9 @@ std::vector<coord> default_velocities () {
             cos_psi = a / std::sqrt(d);
             cos_gamma = std::sqrt(1.0 - (std::pow(mu, 2) + std::pow(cos_psi, 2)));
         } while (std::pow(mu, 2) + std::pow(cos_psi, 2) > 1);
-        directions.emplace_back(std::move(default_velocities(std::make_tuple(cos_psi, mu, cos_gamma))));
+        velocities.push_back(std::move(velocity_direction(cos_psi, mu, cos_gamma)));
     }
-    return directions;
+    return velocities;
 }
 
 // Returns initial coordinates of particles evenly distributed over the volume.
