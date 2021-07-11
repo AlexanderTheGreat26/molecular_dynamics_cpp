@@ -26,8 +26,8 @@
 // Program constants:
 const int N = 1e3; //Number of particles
 const double dt = 1.0e-10; // Time-step
-const double left_border = -0.5;
-const double right_border = 0.5;
+const double left_border = -0.5-3;
+const double right_border = 0.5-3;
 bool realtime = false;
 
 
@@ -103,14 +103,15 @@ int main () {
         name = path + '/' + name;
     }
     int step = 0;
-    data_files (name, coordinates, t);
+    //data_files (name, coordinates, t);
     do {
+        data_files (name, coordinates, t);
         Verlet_integration(coordinates, velocities);
         //std::cout << std::get<0>(velocities[0]) << std::endl;
         E = energy_of_system(velocities);
         std::cout << E - E_init << '\t' << t << std::endl;
         t += dt;
-        data_files (name, coordinates, t);
+
         ++step;
     } while (is_equal(E, E_init) && t < 1.0e3*dt);
     plot(name, left_border, right_border, N, step);
@@ -176,6 +177,8 @@ std::string tuple_to_string (const coord& t) {
 }
 
 void data_file (std::string data_type, std::vector<coord>& data, double& t) {
+    std::string path = std::move(exec("mkdir accelerations && cd accelerations && echo $PWD || cd accelerations/ && echo $PWD"));
+    data_type = path + "/" + data_type;
     std::ofstream fout;
     data_type += ".txt";
     fout.open(data_type, std::ios::app);
@@ -243,8 +246,10 @@ bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2) {
 
 template<size_t Is = 0, typename... Tp>
 void periodic_borders (std::tuple<Tp...>& t) {
-    if (std::fabs(std::get<Is>(t)) >= right_border)
-        std::get<Is>(t) = -std::get<Is>(t);
+    if (std::get<Is>(t) >= right_border)
+        std::get<Is>(t) = left_border;
+    if (std::get<Is>(t) <= left_border)
+        std::get<Is>(t) = right_border;
     if constexpr(Is + 1 != sizeof...(Tp))
         periodic_borders<Is + 1>(t);
 }
