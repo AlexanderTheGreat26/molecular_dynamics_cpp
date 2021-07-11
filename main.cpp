@@ -25,10 +25,12 @@
 
 // Program constants:
 const int N = 1e3; //Number of particles
-const double dt = 1.0e-10; // Time-step
-const double left_border = -0.5-3;
-const double right_border = 0.5-3;
+const double dt = 1.0e-12; // Time-step
+const double left_border = -0.5e-3;
+const double right_border = 0.5e-3;
+const double simulation_time = 1.0e3;
 bool realtime = false;
+
 
 
 // Fundamental constants
@@ -84,6 +86,13 @@ std::string exec (std::string str);
 
 void plot (std::string name, double min, double max, int number_of_points, int& steps);
 
+void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& velocities,
+                         std::string name, double min, double max, int number_of_points, double& E_init);
+
+void computing (std::string& name, std::vector<coord>& coordinates, std::vector<coord>& velocities,
+                double& E, double& t);
+
+
 template<size_t Is = 0, typename... Tp>
 void debug_tuple_output (std::tuple<Tp...>& t) {
     std::cout << std::endl;
@@ -104,21 +113,72 @@ int main () {
     }
     int step = 0;
     //data_files (name, coordinates, t);
-    do {
+    /*do {
         data_files (name, coordinates, t);
         Verlet_integration(coordinates, velocities);
         //std::cout << std::get<0>(velocities[0]) << std::endl;
         E = energy_of_system(velocities);
         std::cout << E - E_init << '\t' << t << std::endl;
         t += dt;
-
         ++step;
-    } while (is_equal(E, E_init) && t < 1.0e3*dt);
+    } while (is_equal(E, E_init) && t < simulation_time);
     plot(name, left_border, right_border, N, step);
+    */
+    real_time_plotting(coordinates, velocities, name, left_border, right_border, N, E_init);
     return 0;
 }
 
 
+void computing (std::string& name, std::vector<coord>& coordinates, std::vector<coord>& velocities,
+                double& E, double& t) {
+    data_files(name, coordinates, t);
+    Verlet_integration(coordinates, velocities);
+    E = energy_of_system(velocities);
+    t += dt;
+}
+
+
+template<typename T, size_t... Is>
+std::string tuple_to_string_impl(T const& t, std::index_sequence<Is...>) {
+    return (((std::to_string(std::get<Is>(t)) + '\t') + ...));
+}
+
+template <class Tuple>
+std::string tuple_to_string (const Tuple& t) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return tuple_to_string_impl(t, std::make_index_sequence<size>{});
+}
+
+void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& velocities,
+                         std::string name, double min, double max, int number_of_points, double& E_init) {
+    std::string range = "[" + std::to_string(min) + ":" + std::to_string(max) + "]";
+    FILE *gp = popen("gnuplot  -persist", "w");
+    if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
+    std::vector<std::string> stuff = {"set term pop",
+                                      //"set output \'" + name + ".gif\'",
+                                      //"set multiplot",
+                                      "set grid xtics ytics ztics",
+                                      "set xrange " + range,
+                                      "set yrange " + range,
+                                      "set zrange " + range,
+                                      "set key off",
+                                      "set ticslevel 0",
+                                      "set border 4095",
+                                      "splot '-' u 1:2:3"};
+    for (const auto& it : stuff)
+        fprintf(gp, "%s\n", it.c_str());
+    std::cout << "Here!\n";
+    double E, t;
+    do {
+        for (auto &coordinate : coordinates)
+            fprintf(gp, "%s\n%s\n", tuple_to_string(coordinate).c_str(), ",");
+        fprintf(gp, "%c\n%s\n", 'e', "splot '-' u 1:2:3");
+        computing(name, coordinates, velocities, E, t);
+        std::cout << fabs(E-E_init) << '\t' << t << std::endl;
+    } while (/*is_equal(E, E_init) &&*/ t < simulation_time);
+    fprintf(gp, "%c\n", 'q');
+    pclose(gp);
+}
 
 void plot (std::string name, double min, double max, int number_of_points, int& steps) {
     std::string range = "[" + std::to_string(min) + ":" + std::to_string(max) + "]";
@@ -164,17 +224,6 @@ void clear_data (std::string& file_name) {
     fout.close();
 }
 
-// REFACTOR OTHERS LIKE THIS!
-template<typename T, size_t... Is>
-std::string tuple_to_string_impl(T const& t, std::index_sequence<Is...>) {
-    return (((std::to_string(std::get<Is>(t)) + '\t') + ...));
-}
-
-template <class coord>
-std::string tuple_to_string (const coord& t) {
-    constexpr auto size = std::tuple_size<coord>{};
-    return tuple_to_string_impl(t, std::make_index_sequence<size>{});
-}
 
 void data_file (std::string data_type, std::vector<coord>& data, double& t) {
     std::string path = std::move(exec("mkdir accelerations && cd accelerations && echo $PWD || cd accelerations/ && echo $PWD"));
@@ -212,8 +261,11 @@ double scalar_square (const Tuple& t) {
 // Used for circuit stability check.
 double energy_of_system (std::vector<coord>& velocities) {
     double E = 0;
-    for (int i = 0; i < N; ++i)
-        E += m*scalar_square(velocities[i]) / 2.0;
+    for (int i = 0; i < N; ++i) {
+        double v2 = scalar_square(velocities[i]);
+        if (std::isfinite(v2))
+            E += m * v2 / 2.0;
+    }
     return E;
 }
 
@@ -276,12 +328,13 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current;
     for (int i = 0; i < N; ++i) {
         a_current = total_particle_acceleration(q);
-        double debug_t = i;
-        data_file("accelerations"+std::to_string(i), a_current, debug_t);
+        //double debug_t = i;
+        //data_file("accelerations"+std::to_string(i), a_current, debug_t);
         coordinate_equations(q[i], v[i], a_current[i]);
         a_next = total_particle_acceleration(q);
-        //if (!is_same(a_current, a_next))
-            velocities_equations(v[i], a_current[i], a_next[i]);
+        if (!is_same(a_current, a_next))
+            std::cout << "Wow!" << std::endl;
+        velocities_equations(v[i], a_current[i], a_next[i]);
         periodic_borders(q[i]);
     }
     momentum_exchange(q, v);
@@ -303,35 +356,22 @@ double distance (const Tuple& t, const Tuple& t1) {
 // If two particles impact they exchange momentums of each other.
 // Input: vector coordinates, vector velocities. Last changes by reference.
 void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& velocities) {
+    static int colisions = 0;
     for (int i = 0; i < N; ++i)
         for (int j = 0; j < N; ++j)
             if (distance(coordinates[i], coordinates[j]) <= R_0 && i != j) {
                 coord buf = velocities[i];
                 velocities[i] = velocities[j];
                 velocities[j] = buf;
+                ++colisions;
             }
+    std::cout << colisions << std::endl;
 }
 
 
 /* Returns vector of accelerations for particles. It's the most time-consuming operation, so it computing in parallels
  * via omp.h. I don't know what more effective: using it in parallel or just using -O3 flag.
  * Input: vector of coordinates. */
-/*std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
-    std::vector<coord> acceleration;
-    double a_x, a_y, a_z;
-    for (int i = 0; i < N; ++i) {
-        a_x = a_y = a_z = 0;
-        for (int j = 0; j < N; ++j)
-            if (i != j && distance(particles[i], particles[j]) <= 3.0 * R_0) {
-                a_x += single_force(std::get<0>(particles[i]) - std::get<0>(particles[j])) / m;
-                a_y += single_force(std::get<1>(particles[i]) - std::get<1>(particles[j])) / m;
-                a_z += single_force(std::get<2>(particles[i]) - std::get<2>(particles[j])) / m;
-            }
-        acceleration.emplace_back(std::make_tuple(a_x, a_y, a_z));
-        }
-    return acceleration;
-
-}*/
 std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
     std::vector<coord> acceleration;
 #pragma omp parallel
