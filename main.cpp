@@ -25,10 +25,10 @@
 
 // Program constants:
 const int N = 1e3; //Number of particles
-const double dt = 1.0e-12; // Time-step
-const double left_border = -0.5e-3;
-const double right_border = 0.5e-3;
-const double simulation_time = 1.0e3;
+const double dt = 1.0e-10; // Time-step
+const double left_border = -0.5e-4;
+const double right_border = 0.5e-4;
+const double simulation_time = 1.0e-7;
 bool realtime = false;
 
 
@@ -43,6 +43,7 @@ const double eps = 119.8;  // Potential pit depth (Theta/k), K
 const double Theta = k*eps;  // Equilibrium temperature
 const double sigma = 3.405e-8;  // Smth like shielding length, cm
 const double R_0 = sigma * pow(2, 1.0/6.0);
+const double R_Ar = 1.88e-8;
 
 // Environment
 const double T = 300; // Temperature, K
@@ -109,8 +110,10 @@ int main () {
     std::string name = "Ar_coordinates";
     if (!realtime) {
         std::string path = std::move(exec("rm -rf trajectories && mkdir trajectories && cd trajectories && echo $PWD"));
+        std::cout << path << std::endl;
         name = path + '/' + name;
     }
+    std::cout << R_0 << std::endl;
     int step = 0;
     //data_files (name, coordinates, t);
     /*do {
@@ -155,8 +158,6 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
     std::vector<std::string> stuff = {"set term pop",
-                                      //"set output \'" + name + ".gif\'",
-                                      //"set multiplot",
                                       "set grid xtics ytics ztics",
                                       "set xrange " + range,
                                       "set yrange " + range,
@@ -167,7 +168,6 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
                                       "splot '-' u 1:2:3"};
     for (const auto& it : stuff)
         fprintf(gp, "%s\n", it.c_str());
-    std::cout << "Here!\n";
     double E, t;
     do {
         for (auto &coordinate : coordinates)
@@ -226,8 +226,8 @@ void clear_data (std::string& file_name) {
 
 
 void data_file (std::string data_type, std::vector<coord>& data, double& t) {
-    std::string path = std::move(exec("mkdir accelerations && cd accelerations && echo $PWD || cd accelerations/ && echo $PWD"));
-    data_type = path + "/" + data_type;
+    //std::string path = std::move(exec("mkdir accelerations && cd accelerations && echo $PWD || cd accelerations/ && echo $PWD"));
+    //data_type = path + "/" + data_type;
     std::ofstream fout;
     data_type += ".txt";
     fout.open(data_type, std::ios::app);
@@ -239,12 +239,15 @@ void data_file (std::string data_type, std::vector<coord>& data, double& t) {
 
 
 void data_files (std::string& name, std::vector<coord>& data, double& t) {
+    static bool flag = false;
     for (int i = 0; i < data.size(); ++i) {
         std::ofstream fout;
         fout.open(name + '.' + std::to_string(i), std::ios::app);
-        fout << tuple_to_string(data[i]) << t << std::endl << std::endl;
+        std::string buf = std::move(tuple_to_string(data[i]));
+        fout << buf << t << ((flag) ? "\n\n" + buf + "\n" : "\n");
         fout.close();
     }
+    flag = true;
 }
 
 template<typename T, size_t... Is>
@@ -313,6 +316,7 @@ void coordinate_equations (coord& q, coord& v, coord& a) {
     //debug_tuple_output(v);
     //std::cout << std::endl;
     std::get<0>(q) += std::get<0>(v)*dt + std::get<0>(a)*std::pow(dt, 2)/2.0;
+    if (!std::isfinite(std::get<0>(q))) std::cout << std::get<0>(a) << std::endl;
     std::get<1>(q) += std::get<1>(v)*dt + std::get<1>(a)*std::pow(dt, 2)/2.0;
     std::get<2>(q) += std::get<2>(v)*dt + std::get<2>(a)*std::pow(dt, 2)/2.0;
 }
@@ -359,7 +363,7 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
     static int colisions = 0;
     for (int i = 0; i < N; ++i)
         for (int j = 0; j < N; ++j)
-            if (distance(coordinates[i], coordinates[j]) <= R_0 && i != j) {
+            if (distance(coordinates[i], coordinates[j]) <= R_Ar && i != j) {
                 coord buf = velocities[i];
                 velocities[i] = velocities[j];
                 velocities[j] = buf;
