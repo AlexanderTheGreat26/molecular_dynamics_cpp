@@ -67,9 +67,7 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
 
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
 
-void velocities_equations (coord& v, coord& a_current, coord& a_next);
-
-void coordinate_equations (coord& q, coord& v, coord& a);
+//void velocities_equations (coord& v, coord& a_current, coord& a_next);
 
 bool is_equal (double a, double b);
 
@@ -115,8 +113,8 @@ int main () {
     }
     std::cout << R_0 << std::endl;
     int step = 0;
-    //data_files (name, coordinates, t);
-    /*do {
+    data_files (name, coordinates, t);
+    do {
         data_files (name, coordinates, t);
         Verlet_integration(coordinates, velocities);
         //std::cout << std::get<0>(velocities[0]) << std::endl;
@@ -126,8 +124,8 @@ int main () {
         ++step;
     } while (is_equal(E, E_init) && t < simulation_time);
     plot(name, left_border, right_border, N, step);
-    */
-    real_time_plotting(coordinates, velocities, name, left_border, right_border, N, E_init);
+
+    //real_time_plotting(coordinates, velocities, name, left_border, right_border, N, E_init);
     return 0;
 }
 
@@ -226,8 +224,8 @@ void clear_data (std::string& file_name) {
 
 
 void data_file (std::string data_type, std::vector<coord>& data, double& t) {
-    //std::string path = std::move(exec("mkdir accelerations && cd accelerations && echo $PWD || cd accelerations/ && echo $PWD"));
-    //data_type = path + "/" + data_type;
+    std::string path = std::move(exec("mkdir accelerations && cd accelerations && echo $PWD || cd accelerations/ && echo $PWD"));
+    data_type = path + "/" + data_type;
     std::ofstream fout;
     data_type += ".txt";
     fout.open(data_type, std::ios::app);
@@ -309,22 +307,18 @@ void periodic_borders (std::tuple<Tp...>& t) {
         periodic_borders<Is + 1>(t);
 }
 
-/* Well, using it this way is a bad way. Better to write templates, but it is necessary to change the architecture of
- * the program. So two functions bellow just difference equations of Verlet integration.
- * Input: vectors of coordinates (velocities) in tuple. Change by reference. */
-void coordinate_equations (coord& q, coord& v, coord& a) {
-    //debug_tuple_output(v);
-    //std::cout << std::endl;
-    std::get<0>(q) += std::get<0>(v)*dt + std::get<0>(a)*std::pow(dt, 2)/2.0;
-    if (!std::isfinite(std::get<0>(q))) std::cout << std::get<0>(a) << std::endl;
-    std::get<1>(q) += std::get<1>(v)*dt + std::get<1>(a)*std::pow(dt, 2)/2.0;
-    std::get<2>(q) += std::get<2>(v)*dt + std::get<2>(a)*std::pow(dt, 2)/2.0;
+template<size_t Is = 0, typename... Tp>
+void coordinates_equations (std::tuple<Tp...>& q, std::tuple<Tp...>& v, std::tuple<Tp...>& a) {
+    std::get<Is>(q) += std::get<Is>(v)*dt + std::get<Is>(a)*std::pow(dt, 2) / 2.0;
+    if constexpr(Is + 1 != sizeof...(Tp))
+        coordinates_equations<Is + 1>(q, v, a);
 }
 
-void velocities_equations (coord& v, coord& a_current, coord& a_next) {
-    std::get<0>(v) += (std::get<0>(a_next) + std::get<0>(a_current)) / 2.0 * dt;
-    std::get<1>(v) += (std::get<1>(a_next) + std::get<1>(a_current)) / 2.0 * dt;
-    std::get<2>(v) += (std::get<2>(a_next) + std::get<2>(a_current)) / 2.0 * dt;
+template<size_t Is = 0, typename... Tp>
+void velocities_equations (std::tuple<Tp...>& v, std::tuple<Tp...>& a_current, std::tuple<Tp...>& a_next) {
+    std::get<Is>(v) += (std::get<Is>(a_current) + std::get<Is>(a_next)) / 2.0 * dt;
+    if constexpr(Is + 1 != sizeof...(Tp))
+        velocities_equations<Is + 1>(v, a_current, a_next);
 }
 
 // Input: vectors coordinates and velocities. Output: vector of coordinates after one time-step.
@@ -332,12 +326,13 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current;
     for (int i = 0; i < N; ++i) {
         a_current = total_particle_acceleration(q);
-        //double debug_t = i;
-        //data_file("accelerations"+std::to_string(i), a_current, debug_t);
-        coordinate_equations(q[i], v[i], a_current[i]);
+        coordinates_equations(q[i], v[i], a_current[i]);
         a_next = total_particle_acceleration(q);
-        if (!is_same(a_current, a_next))
-            std::cout << "Wow!" << std::endl;
+        if (!is_same(a_current, a_next)) {
+            std::cout << i <<'\t' << "Wow!" << std::endl;
+            double debug_t = i;
+            data_file("accelerations"+std::to_string(i), a_next, debug_t);
+        }
         velocities_equations(v[i], a_current[i], a_next[i]);
         periodic_borders(q[i]);
     }
@@ -373,6 +368,13 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
 }
 
 
+template<size_t Is = 0, typename... Tp>
+void acceleration_projections (std::tuple<Tp...>& a, std::tuple<Tp...>& q1, std::tuple<Tp...>& q2) {
+    std::get<Is>(a) += single_force(std::get<Is>(q1) - std::get<Is>(q2)) / 2;
+    if constexpr(Is + 1 != sizeof...(Tp))
+        acceleration_projections<Is + 1>(a, q1, q2);
+}
+
 /* Returns vector of accelerations for particles. It's the most time-consuming operation, so it computing in parallels
  * via omp.h. I don't know what more effective: using it in parallel or just using -O3 flag.
  * Input: vector of coordinates. */
@@ -382,16 +384,19 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
     {
         std::vector<coord> acceleration_private;
         double a_x, a_y, a_z;
+        coord a;
 #pragma omp for nowait schedule(static)
         for (int i = 0; i < N; ++i) {
             a_x = a_y = a_z = 0;
             for (int j = 0; j < N; ++j)
                 if (i != j && distance(particles[i], particles[j]) <= 3.0 * R_0) {
-                    a_x += single_force(std::get<0>(particles[i]) - std::get<0>(particles[j])) / m;
-                    a_y += single_force(std::get<1>(particles[i]) - std::get<1>(particles[j])) / m;
-                    a_z += single_force(std::get<2>(particles[i]) - std::get<2>(particles[j])) / m;
+                    acceleration_projections(a, particles[i], particles[j]);
+                    //a_x += single_force(std::get<0>(particles[i]) - std::get<0>(particles[j])) / m;
+                    //a_y += single_force(std::get<1>(particles[i]) - std::get<1>(particles[j])) / m;
+                    //a_z += single_force(std::get<2>(particles[i]) - std::get<2>(particles[j])) / m;
                 }
-            acceleration_private.emplace_back(std::make_tuple(a_x, a_y, a_z));
+            acceleration_private.emplace_back(a);
+            //acceleration_private.emplace_back(std::make_tuple(a_x, a_y, a_z));
         }
 
 #pragma omp for schedule(static) ordered
