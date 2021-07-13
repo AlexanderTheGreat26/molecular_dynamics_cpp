@@ -142,7 +142,7 @@ void computing (std::string& name, std::vector<coord>& coordinates, std::vector<
 
 
 template<typename T, size_t... Is>
-std::string tuple_to_string_impl(T const& t, std::index_sequence<Is...>) {
+std::string tuple_to_string_impl (T const& t, std::index_sequence<Is...>) {
     return (((std::to_string(std::get<Is>(t)) + '\t') + ...));
 }
 
@@ -175,7 +175,7 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
         fprintf(gp, "%c\n%s\n", 'e', "splot '-' u 1:2:3");
         computing(name, coordinates, velocities, E, t);
         std::cout << fabs(E-E_init) << '\t' << t << std::endl;
-    } while (/*is_equal(E, E_init) &&*/ t < simulation_time);
+    } while (is_equal(E, E_init) && t < simulation_time);
     fprintf(gp, "%c\n", 'q');
     pclose(gp);
 }
@@ -244,7 +244,7 @@ void data_files (std::string& name, std::vector<coord>& data, double& t) {
         std::ofstream fout;
         fout.open(name + '.' + std::to_string(i), std::ios::app);
         std::string buf = std::move(tuple_to_string(data[i]));
-        fout << buf << t << ((flag) ? "\n\n" + buf + "\n" : "\n");
+        fout << buf << t << ((flag) ? "\n\n\n\n" + buf + "\n" : "\n");
         fout.close();
     }
     flag = true;
