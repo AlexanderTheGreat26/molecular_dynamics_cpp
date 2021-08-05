@@ -4,7 +4,9 @@
  * Initial coordinates and velocities directions distributed evenly.
  * By vector in comments it should be understood std::vector<std::tuple<>>,
  * by coordinates, velocities and accelerations it should be understood std::tuple contains projections on coordinate
- * axes. */
+ * axes.
+ * Graphics realised via gnuplot.
+ * */
 
 #include <iostream>
 #include <cmath>
@@ -25,9 +27,9 @@
 
 // Program constants:
 const int N = 1e3; //Number of particles
-const double dt = 1.0e-10; // Time-step
-const double left_border = -0.5e-4;
-const double right_border = 0.5e-4;
+const double dt = 1.0e-13; // Time-step
+const double left_border = -1.73e-7;
+const double right_border = 1.73e-7;
 const double simulation_time = 1.0e-7;
 bool realtime = false;
 
@@ -42,12 +44,13 @@ const double m = 6.6335e-23;  // Argon mass, g
 const double eps = 119.8;  // Potential pit depth (Theta/k), K
 const double Theta = k*eps;  // Equilibrium temperature
 const double sigma = 3.405e-8;  // Smth like shielding length, cm
-const double R_0 = sigma * pow(2, 1.0/6.0);
-const double R_Ar = 1.88e-8;
+const double R_0 = sigma * pow(2.0, 1.0/6.0);
+const double R_Ar = 1.92-8;
 
 // Environment
 const double T = 300; // Temperature, K
-const double V_init = std::sqrt(3*k*T / m);  // Initial particles velocity
+//const double V_init = std::sqrt(3*k*T / m);  // Initial particles velocity
+const double  V_init = 5.2645e+04;
 
 typedef std::tuple<double, double, double> coord;
 
@@ -55,9 +58,9 @@ std::random_device rd;  //Will be used to obtain a seed for the random number en
 std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
 
 
-std::vector<coord> default_coordinates ();
+std::vector<coord> initial_coordinates ();
 
-std::vector<coord> default_velocities ();
+std::vector<coord> initial_velocities ();
 
 double single_force (double R);
 
@@ -66,8 +69,6 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles);
 void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& velocities);
 
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
-
-//void velocities_equations (coord& v, coord& a_current, coord& a_next);
 
 bool is_equal (double a, double b);
 
@@ -101,8 +102,8 @@ void debug_tuple_output (std::tuple<Tp...>& t) {
 }
 
 int main () {
-    std::vector<coord> coordinates = std::move(default_coordinates());
-    std::vector<coord> velocities = std::move(default_velocities());
+    std::vector<coord> coordinates = std::move(initial_coordinates());
+    std::vector<coord> velocities = std::move(initial_velocities());
     double E, E_init = N * m*std::pow(V_init, 2)/2.0;
     double t = 0;
     std::string name = "Ar_coordinates";
@@ -113,7 +114,7 @@ int main () {
     }
     std::cout << R_0 << std::endl;
     int step = 0;
-    data_files (name, coordinates, t);
+    /*data_files (name, coordinates, t);
     do {
         data_files (name, coordinates, t);
         Verlet_integration(coordinates, velocities);
@@ -124,8 +125,10 @@ int main () {
         ++step;
     } while (is_equal(E, E_init) && t < simulation_time);
     plot(name, left_border, right_border, N, step);
-
-    //real_time_plotting(coordinates, velocities, name, left_border, right_border, N, E_init);
+*/
+    std::string test = exec("rm -rf velocities && mkdir velocities");
+    std::cout << test << std::endl;
+    real_time_plotting(coordinates, velocities, name, left_border, right_border, N, E_init);
     return 0;
 }
 
@@ -133,6 +136,12 @@ int main () {
 void computing (std::string& name, std::vector<coord>& coordinates, std::vector<coord>& velocities,
                 double& E, double& t) {
     data_files(name, coordinates, t);
+
+    std::string path = std::move(exec("cd velocities && echo $PWD"));
+    std::string V_names = path + "/velocities";
+    data_files(V_names, velocities, t);
+
+
     Verlet_integration(coordinates, velocities);
     E = energy_of_system(velocities);
     t += dt;
@@ -178,6 +187,7 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
     pclose(gp);
 }
 
+// Creates a gif-file with molecular motion animation.
 void plot (std::string name, double min, double max, int number_of_points, int& steps) {
     std::string range = "[" + std::to_string(min) + ":" + std::to_string(max) + "]";
     FILE *gp = popen("gnuplot  -persist", "w");
@@ -202,7 +212,7 @@ void plot (std::string name, double min, double max, int number_of_points, int& 
     pclose(gp);
 }
 
-
+//The function returns the terminal ans. Input - string for term.
 std::string exec (std::string str) {
     const char* cmd = str.c_str();
     std::array<char, 128> buffer;
@@ -370,7 +380,8 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
 
 template<size_t Is = 0, typename... Tp>
 void acceleration_projections (std::tuple<Tp...>& a, std::tuple<Tp...>& q1, std::tuple<Tp...>& q2) {
-    std::get<Is>(a) += single_force(std::get<Is>(q1) - std::get<Is>(q2)) / 2;
+    double F = single_force(std::get<Is>(q1) - std::get<Is>(q2)) / 2;
+    std::get<Is>(a) += (std::isfinite(F) ? F/m : 0);
     if constexpr(Is + 1 != sizeof...(Tp))
         acceleration_projections<Is + 1>(a, q1, q2);
 }
@@ -420,7 +431,7 @@ coord velocity_direction (double& cos_psi, double& mu, double& cos_gamma) {
 }
 
 // Returns vector of velocities for every particles.
-std::vector<coord> default_velocities () {
+std::vector<coord> initial_velocities () {
     std::vector<coord> velocities;
     coord direction;
     std::uniform_real_distribution<> dis(0.0, 1.0);
@@ -442,7 +453,7 @@ std::vector<coord> default_velocities () {
 }
 
 // Returns initial coordinates of particles evenly distributed over the volume.
-std::vector<coord> default_coordinates () {
+std::vector<coord> initial_coordinates () {
     std::vector<coord> coordinates;
     std::uniform_real_distribution<> dis(left_border, right_border);
     for (int i = 0; i < N; ++i) {
