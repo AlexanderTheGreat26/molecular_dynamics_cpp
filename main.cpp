@@ -25,44 +25,61 @@
 #include "omp.h"
 
 
-// Program constants:
-const int N = 1e3; //Number of particles
-const double dt = 1.0e-13; // Time-step
-const double left_border = -1.73e-7;
-const double right_border = 1.73e-7;
-const double simulation_time = 1.0e-7;
-bool realtime = false;
-
-
-
 // Fundamental constants
-const double k = 1.380649e-16; // Boltzmann constant, erg/K
+const double k_B = 1.380649e-16; // Boltzmann constant, erg/K
+
 
 // Substance characteristics
 const std::string substance = "Ar";
 const double m = 6.6335e-23;  // Argon mass, g
-const double eps = 119.8;  // Potential pit depth (Theta/k), K
-const double Theta = k*eps;  // Equilibrium temperature
+const double eps = 119.8;  // Potential pit depth (Theta/k_B), K
+const double Theta = k_B * eps;  // Equilibrium temperature
 const double sigma = 3.405e-8;  // Smth like shielding length, cm
 const double R_0 = sigma * pow(2.0, 1.0/6.0);
-const double R_Ar = 1.92-8;
+const double R_Ar = 0.71e-8;
 
-// Environment
+
+// Gas characteristics
+const double P = 1.0e8;
 const double T = 300; // Temperature, K
-//const double V_init = std::sqrt(3*k*T / m);  // Initial particles velocity
-const double  V_init = 5.2645e+04;
+const double n = P / k_B / T; // Concentration, 1/cm^-3
+const double V_init = sqrt(3 * k_B * T / m); // rms speed corresponding to a given temperature (T), cm/c
+
+
+// Program constants
+const int N = 1e2; //Number of particles
+const double dt = 1.0e-14; // Time-step
+const double simulation_time = 1.0e-7;
+const double R_max = 2.0*R_0;
+bool realtime = false;
+
+
+// Model constants
+const double Volume = N/n;
+const double characteristic_size = std::pow(Volume, 1.0/3.0);
+const double left_border = -characteristic_size / 2.0;
+const double right_border = characteristic_size / 2.0;
+
 
 typedef std::tuple<double, double, double> coord;
 
-std::random_device rd;  //Will be used to obtain a seed for the random number engine
-std::mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
+std::vector<coord> neighboring_cubes; // Contains coordinates of centers virtual areas
+
+
+std::random_device rd;  // Will be used to obtain a seed for the random number engine
+std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
+
+
+
 
 
 std::vector<coord> initial_coordinates ();
 
 std::vector<coord> initial_velocities ();
 
-double single_force (double R);
+double single_force (double& R);
+
+coord minimal_distance (coord& q1, coord& q2, double& R_ij);
 
 std::vector<coord> total_particle_acceleration (std::vector<coord>& particles);
 
@@ -92,6 +109,16 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
 void computing (std::string& name, std::vector<coord>& coordinates, std::vector<coord>& velocities,
                 double& E, double& t);
 
+std::vector<coord> areas_centers (double a);
+
+
+#include <sstream>
+template <typename T>
+std::string toString(T val){
+    std::ostringstream oss;
+    oss << val;
+    return oss.str();
+}
 
 template<size_t Is = 0, typename... Tp>
 void debug_tuple_output (std::tuple<Tp...>& t) {
@@ -104,6 +131,7 @@ void debug_tuple_output (std::tuple<Tp...>& t) {
 int main () {
     std::vector<coord> coordinates = std::move(initial_coordinates());
     std::vector<coord> velocities = std::move(initial_velocities());
+    neighboring_cubes = std::move(areas_centers(characteristic_size));
     double E, E_init = N * m*std::pow(V_init, 2)/2.0;
     double t = 0;
     std::string name = "Ar_coordinates";
@@ -127,9 +155,19 @@ int main () {
     plot(name, left_border, right_border, N, step);
 */
     std::string test = exec("rm -rf velocities && mkdir velocities");
-    std::cout << test << std::endl;
+    std::cout << Volume << std::endl;
     real_time_plotting(coordinates, velocities, name, left_border, right_border, N, E_init);
     return 0;
+}
+
+
+std::vector<coord> areas_centers (double a) {
+    std::vector<std::tuple<double, double, double>> centers;
+    for (int k = 0; k < 3; ++k)
+        for (int j = 0; j < 3; ++j)
+            for (int i = 0; i < 3; ++i)
+                centers.emplace_back(std::make_tuple(-a + i*a, -a + j*a, -a + k*a));
+    return centers;
 }
 
 
@@ -150,7 +188,7 @@ void computing (std::string& name, std::vector<coord>& coordinates, std::vector<
 
 template<typename T, size_t... Is>
 std::string tuple_to_string_impl (T const& t, std::index_sequence<Is...>) {
-    return (((std::to_string(std::get<Is>(t)) + '\t') + ...));
+    return (((toString(std::get<Is>(t)) + '\t') + ...));
 }
 
 template <class Tuple>
@@ -159,9 +197,10 @@ std::string tuple_to_string (const Tuple& t) {
     return tuple_to_string_impl(t, std::make_index_sequence<size>{});
 }
 
+
 void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& velocities,
                          std::string name, double min, double max, int number_of_points, double& E_init) {
-    std::string range = "[" + std::to_string(min) + ":" + std::to_string(max) + "]";
+    std::string range = "[" + toString(min) + ":" + toString(max) + "]";
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
     std::vector<std::string> stuff = {"set term pop",
@@ -177,11 +216,14 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
         fprintf(gp, "%s\n", it.c_str());
     double E, t;
     do {
-        for (auto &coordinate : coordinates)
+        std::cout << t << std::endl;
+        for (auto & coordinate : coordinates) {
             fprintf(gp, "%s\n%s\n", tuple_to_string(coordinate).c_str(), ",");
+            //std::cout << '\n' << std::get<0>(coordinate) << "\n\n\n\n\n\n";
+        }
         fprintf(gp, "%c\n%s\n", 'e', "splot '-' u 1:2:3");
         computing(name, coordinates, velocities, E, t);
-        std::cout << fabs(E-E_init) << '\t' << t << std::endl;
+        //std::cout << fabs(E-E_init) << '\t' << t << std::endl;
     } while (is_equal(E, E_init) && t < simulation_time);
     fprintf(gp, "%c\n", 'q');
     pclose(gp);
@@ -189,7 +231,7 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
 
 // Creates a gif-file with molecular motion animation.
 void plot (std::string name, double min, double max, int number_of_points, int& steps) {
-    std::string range = "[" + std::to_string(min) + ":" + std::to_string(max) + "]";
+    std::string range = "[" + toString(min) + ":" + toString(max) + "]";
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
     std::vector<std::string> stuff = {"set term gif animate delay 100",
@@ -202,8 +244,8 @@ void plot (std::string name, double min, double max, int number_of_points, int& 
                                       "set key off",
                                       "set ticslevel 0",
                                       "set border 4095",
-                                      "do for [i = 0:" + std::to_string(number_of_points-1) + "] {" ,
-                                            "do for [j = 0:" + std::to_string(steps-1) + "] {",
+                                      "do for [i = 0:" + toString(number_of_points-1) + "] {" ,
+                                            "do for [j = 0:" + toString(steps-1) + "] {",
                                                 "splot \'" + name + ".\'.i using 1:2:3 index j w linespoints pt 7,/",
                                       "} \ }",
                                       "q"};
@@ -250,7 +292,7 @@ void data_files (std::string& name, std::vector<coord>& data, double& t) {
     static bool flag = false;
     for (int i = 0; i < data.size(); ++i) {
         std::ofstream fout;
-        fout.open(name + '.' + std::to_string(i), std::ios::app);
+        fout.open(name + '.' + toString(i), std::ios::app);
         std::string buf = std::move(tuple_to_string(data[i]));
         fout << buf << t << ((flag) ? "\n\n\n\n" + buf + "\n" : "\n");
         fout.close();
@@ -338,11 +380,11 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
         a_current = total_particle_acceleration(q);
         coordinates_equations(q[i], v[i], a_current[i]);
         a_next = total_particle_acceleration(q);
-        if (!is_same(a_current, a_next)) {
+        /*if (!is_same(a_current, a_next)) {
             std::cout << i <<'\t' << "Wow!" << std::endl;
             double debug_t = i;
-            data_file("accelerations"+std::to_string(i), a_next, debug_t);
-        }
+            data_file("accelerations"+toString(i), a_next, debug_t);
+        }*/
         velocities_equations(v[i], a_current[i], a_next[i]);
         periodic_borders(q[i]);
     }
@@ -368,19 +410,44 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
     static int colisions = 0;
     for (int i = 0; i < N; ++i)
         for (int j = 0; j < N; ++j)
-            if (distance(coordinates[i], coordinates[j]) <= R_Ar && i != j) {
+            if (distance(coordinates[i], coordinates[j]) <= 2.0*R_Ar && i != j) {
                 coord buf = velocities[i];
                 velocities[i] = velocities[j];
                 velocities[j] = buf;
                 ++colisions;
             }
-    std::cout << colisions << std::endl;
+    //std::cout << colisions << std::endl;
 }
 
 
 template<size_t Is = 0, typename... Tp>
+void vector_offset (std::tuple<Tp...>& vector, std::tuple<Tp...>& frame_of_reference, std::tuple<Tp...>& result) {
+    std::get<Is>(result) = std::get<Is>(vector) + std::get<Is>(frame_of_reference);
+    if constexpr(Is + 1 != sizeof...(Tp))
+        vector_offset<Is + 1>(vector, frame_of_reference, result);
+}
+
+coord minimal_distance (coord& q1, coord& q2, double& R_ij) {
+    double test;
+    R_ij = 1.0e300;
+    coord offseted, result;
+    for (auto & neighboring_cube : neighboring_cubes) {
+        vector_offset(q2, neighboring_cube, offseted);
+        test = distance(q1, offseted);
+        if (test < R_ij) {
+            R_ij = test;
+            result = offseted;
+        }
+    }
+    return result;
+}
+
+template<size_t Is = 0, typename... Tp>
 void acceleration_projections (std::tuple<Tp...>& a, std::tuple<Tp...>& q1, std::tuple<Tp...>& q2) {
-    double F = single_force(std::get<Is>(q1) - std::get<Is>(q2)) / 2;
+    double R_ij;
+    coord second_particle = std::move(minimal_distance(q1, q2, R_ij));
+    double F = (R_ij < R_max) ? single_force(std::get<Is>(second_particle)) / 2.0 : 0;
+    //std::cout << R_ij << std::endl;
     std::get<Is>(a) += (std::isfinite(F) ? F/m : 0);
     if constexpr(Is + 1 != sizeof...(Tp))
         acceleration_projections<Is + 1>(a, q1, q2);
@@ -400,7 +467,7 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
         for (int i = 0; i < N; ++i) {
             a_x = a_y = a_z = 0;
             for (int j = 0; j < N; ++j)
-                if (i != j && distance(particles[i], particles[j]) <= 3.0 * R_0) {
+                if (i != j) {
                     acceleration_projections(a, particles[i], particles[j]);
                     //a_x += single_force(std::get<0>(particles[i]) - std::get<0>(particles[j])) / m;
                     //a_y += single_force(std::get<1>(particles[i]) - std::get<1>(particles[j])) / m;
@@ -421,7 +488,7 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
 
 
 // Returns force of two-particles interaction via Lennard-Jones potential. Input distance between two particles.
-double single_force (double R) {
+double single_force (double& R) {
     return 24.0 * Theta / R * (2.0 * pow(sigma / R, 12.0) - pow(sigma / R, 6.0));
 }
 
@@ -445,9 +512,10 @@ std::vector<coord> initial_velocities () {
                 d = std::pow(a, 2) + std::pow(b, 2);
             } while (d > 1);
             cos_psi = a / std::sqrt(d);
-            cos_gamma = std::sqrt(1.0 - (std::pow(mu, 2) + std::pow(cos_psi, 2)));
+            cos_gamma = std::sqrt(1.0 - (std::pow(mu, 2) + std::pow(cos_psi, 2)))*
+                    ((dis(gen) > 0.5) ? 1 : (-1));
         } while (std::pow(mu, 2) + std::pow(cos_psi, 2) > 1);
-        velocities.push_back(std::move(velocity_direction(cos_psi, mu, cos_gamma)));
+        velocities.emplace_back(std::move(velocity_direction(cos_psi, mu, cos_gamma)));
     }
     return velocities;
 }
