@@ -14,7 +14,6 @@
 #include <vector>
 #include <utility>
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <tuple>
 #include <array>
@@ -22,6 +21,7 @@
 #include <iterator>
 #include <memory>
 #include <stdexcept>
+#include <sstream>
 #include "omp.h"
 
 
@@ -40,7 +40,7 @@ const double R_Ar = 0.71e-8;
 
 
 // Gas characteristics
-const double P = 1.0e8;
+const double P = 1.0e6;
 const double T = 300; // Temperature, K
 const double n = P / k_B / T; // Concentration, 1/cm^-3
 const double V_init = sqrt(3 * k_B * T / m); // rms speed corresponding to a given temperature (T), cm/c
@@ -48,9 +48,9 @@ const double V_init = sqrt(3 * k_B * T / m); // rms speed corresponding to a giv
 
 // Program constants
 const int N = 1e2; //Number of particles
-const double dt = 1.0e-14; // Time-step
+const double dt = 1.0e-12; // Time-step
 const double simulation_time = 1.0e-7;
-const double R_max = 2.0*R_0;
+const double R_max = 3.0*R_0;
 bool realtime = false;
 
 
@@ -64,6 +64,15 @@ const double right_border = characteristic_size / 2.0;
 typedef std::tuple<double, double, double> coord;
 
 std::vector<coord> neighboring_cubes; // Contains coordinates of centers virtual areas
+
+typedef std::tuple<double, double, double, double> planes;
+
+std::vector<planes> area_borders = {std::make_tuple(0, 0, 1, left_border),
+                                    std::make_tuple(0, 0, 1, right_border),
+                                    std::make_tuple(0, 1, 0, left_border),
+                                    std::make_tuple(0, 1, 0, right_border),
+                                    std::make_tuple(1, 0, 0, left_border),
+                                    std::make_tuple(1, 0, 0, right_border)};
 
 
 std::random_device rd;  // Will be used to obtain a seed for the random number engine
@@ -128,6 +137,7 @@ void debug_tuple_output (std::tuple<Tp...>& t) {
         debug_tuple_output<Is + 1>(t);
 }
 
+
 int main () {
     std::vector<coord> coordinates = std::move(initial_coordinates());
     std::vector<coord> velocities = std::move(initial_velocities());
@@ -159,6 +169,158 @@ int main () {
     real_time_plotting(coordinates, velocities, name, left_border, right_border, N, E_init);
     return 0;
 }
+
+
+template<typename T, size_t... Is>
+double distance_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+    return (std::sqrt((std::pow(std::get<Is>(t) - std::get<Is>(t1), 2) + ...)));
+}
+
+template <class Tuple>
+double distance (const Tuple& t, const Tuple& t1) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return distance_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
+}
+
+
+template<typename T, size_t... Is>
+double vector_length_impl (T const& t, std::index_sequence<Is...>) {
+    return std::sqrt((std::pow(std::get<Is>(t), 2) + ...));
+}
+
+template <class Tuple>
+double vector_length (const Tuple& t) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return vector_length_impl(t, std::make_index_sequence<size>{});
+}
+
+
+template<typename T, size_t... Is>
+double scalar_product_impl (T const& t1, std::index_sequence<Is...>, T const& t2, std::index_sequence<Is...>) {
+    return ((std::get<Is>(t1)*std::get<Is>(t2)) + ...);
+}
+
+template <class Tuple>
+double scalar_product (const Tuple& t1, const Tuple& t2) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return scalar_product_impl(t1, std::make_index_sequence<size>{}, t2, std::make_index_sequence<size>{});
+}
+
+
+double cos_ab (coord& a, coord& b) {
+    return scalar_product(a, b) / (vector_length(a) * vector_length(b));
+}
+
+
+
+template<size_t Is = 0, typename... Tp>
+void vector_creation (std::tuple<Tp...>& a, std::tuple<Tp...>& b, std::tuple<Tp...>& result) {
+    std::get<Is>(result) = std::get<Is>(b) - std::get<Is>(a);
+    if constexpr(Is + 1 != sizeof...(Tp))
+        vector_creation<Is + 1>(a, b, result);
+}
+
+
+coord intersection_point (coord& q1, coord& q2, double& A, double& B, double& C, double& D, coord& r) {
+
+    double x0 = std::get<0>(q1);
+    double y0 = std::get<1>(q1);
+    double z0 = std::get<2>(q1);
+
+
+    double p1 = std::get<0>(r);
+    double p2 = std::get<1>(r);
+    double p3 = std::get<2>(r);
+
+    double t = - (D + A*x0 + B*y0 + C*z0) / (A*p1 + B*p2 + C*p3);
+
+    double x = p1*t + x0;
+    double y = p2*t + y0;
+    double z = p3*t + z0;
+
+    return std::make_tuple(x, y, z);
+}
+
+
+coord intersection_points_for_planes (coord& q1, coord& q2, planes& plane) {
+    coord r;
+    vector_creation(q1, q2, r);
+    double A = std::get<0>(plane);
+    double B = std::get<1>(plane);
+    double C = std::get<2>(plane);
+    double D = std::get<3>(plane);
+    return std::move(intersection_point(q1, q2, A, B, C, D, r));
+}
+
+
+template<typename T, size_t... Is>
+auto equal_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+    return ((is_equal(std::get<Is>(t), std::get<Is>(t1))) & ...);
+}
+
+template <class Tuple>
+bool equal_tuples (const Tuple& t, const Tuple& t1) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return equal_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
+}
+
+
+template<size_t Is = 0, typename... Tp>
+void vector_offset (std::tuple<Tp...>& vector, std::tuple<Tp...>& frame_of_reference, std::tuple<Tp...>& result) {
+    std::get<Is>(result) = std::get<Is>(vector) + std::get<Is>(frame_of_reference);
+    if constexpr(Is + 1 != sizeof...(Tp))
+        vector_offset<Is + 1>(vector, frame_of_reference, result);
+}
+
+
+coord next_step_position (coord& q1, coord& q2) {
+    auto intersected_plane = area_borders[0];
+    coord q, dq, closest, normal, moving, full_moving;
+    double r, d = 1.0e308;
+    for (auto & area_border : area_borders) {
+        double A = std::get<0>(area_border);
+        double B = std::get<1>(area_border);
+        double C = std::get<2>(area_border);
+        double D = std::get<3>(area_border);
+        vector_creation(q1, q2, q);
+        coord intersection = std::move(intersection_point(q1, q2, A, B, C, D, q));
+        vector_creation(q1, intersection, dq);
+        r = vector_length(dq);
+        if (is_equal(cos_ab(dq, q), 1) && r < d) {
+            closest = intersection;
+            moving = dq;
+            full_moving = q;
+            d = r;
+            normal = std::make_tuple(A, B, C);
+            intersected_plane = area_border;
+        }
+    }
+
+    auto opposite_plane = intersected_plane;
+    for (auto & area_border : area_borders) {
+        double A = std::get<0>(area_border);
+        double B = std::get<1>(area_border);
+        double C = std::get<2>(area_border);
+        coord test_normal = std::make_tuple(A, B, C);
+        if (equal_tuples(normal, test_normal) && !equal_tuples(area_border, intersected_plane))
+            opposite_plane = area_border;
+    }
+    coord M = std::move(intersection_points_for_planes(q1, q2, opposite_plane));
+    double way = characteristic_size / cos_ab(normal, moving);
+    double fraction = modf(way, &r); // The final moving relatively q1.
+    coord between_planes;
+    vector_creation(M, closest, between_planes);
+    double lambda = fraction / vector_length(between_planes);
+    coord final_moving_vector = std::make_tuple(std::get<0>(between_planes) * lambda,
+                                                std::get<1>(between_planes) * lambda,
+                                                std::get<2>(between_planes) * lambda);
+    coord ans;
+    vector_offset(final_moving_vector, M, ans);
+    return ans;
+}
+
+
+
 
 
 std::vector<coord> areas_centers (double a) {
@@ -224,7 +386,7 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
         fprintf(gp, "%c\n%s\n", 'e', "splot '-' u 1:2:3");
         computing(name, coordinates, velocities, E, t);
         //std::cout << fabs(E-E_init) << '\t' << t << std::endl;
-    } while (is_equal(E, E_init) && t < simulation_time);
+    } while (/*is_equal(E, E_init) && */t < simulation_time);
     fprintf(gp, "%c\n", 'q');
     pclose(gp);
 }
@@ -327,16 +489,7 @@ bool is_equal (double a, double b) {
     return std::fabs(a - b) < std::numeric_limits<double>::epsilon();
 }
 
-template<typename T, size_t... Is>
-auto equal_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
-    return ((is_equal(std::get<Is>(t), std::get<Is>(t1))) & ...);
-}
 
-template <class Tuple>
-bool equal_tuples (const Tuple& t, const Tuple& t1) {
-    constexpr auto size = std::tuple_size<Tuple>{};
-    return equal_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
-}
 
 // Function returns true, if vectors of tuples are same. Estimates with error of computer representation of doubles.
 bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2) {
@@ -349,19 +502,40 @@ bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2) {
     return ans;
 }
 
-template<size_t Is = 0, typename... Tp>
-void periodic_borders (std::tuple<Tp...>& t) {
-    if (std::get<Is>(t) >= right_border)
-        std::get<Is>(t) = left_border;
-    if (std::get<Is>(t) <= left_border)
-        std::get<Is>(t) = right_border;
+
+/*template<size_t Is = 0, typename... Tp>
+void border_intersection (std::tuple<Tp...>& t) {
+    if (std::fabs(std::get<Is>(t)) > right_border)
+
     if constexpr(Is + 1 != sizeof...(Tp))
-        periodic_borders<Is + 1>(t);
+        border_intersection<Is + 1>(t);
+}*/
+
+
+template<typename T, size_t... Is>
+bool border_intersection_impl (T const& t, std::index_sequence<Is...>) {
+    return ((std::fabs(std::get<Is>(t)) > right_border) & ...);
 }
+
+template <class Tuple>
+bool border_intersection (const Tuple& t) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return border_intersection_impl(t, std::make_index_sequence<size>{});
+}
+
+
+void periodic_borders (std::vector<coord>& q1, std::vector<coord>& q2) {
+    for (int i = 0; i < q2.size(); ++i)
+        if (border_intersection(q2[i]))
+            q2[i] = std::move(next_step_position(q1[i], q2[i]));
+}
+
 
 template<size_t Is = 0, typename... Tp>
 void coordinates_equations (std::tuple<Tp...>& q, std::tuple<Tp...>& v, std::tuple<Tp...>& a) {
     std::get<Is>(q) += std::get<Is>(v)*dt + std::get<Is>(a)*std::pow(dt, 2) / 2.0;
+    //debug_tuple_output(q);
+    //std::cout << std::get<Is>(v) << std::endl;
     if constexpr(Is + 1 != sizeof...(Tp))
         coordinates_equations<Is + 1>(q, v, a);
 }
@@ -376,6 +550,7 @@ void velocities_equations (std::tuple<Tp...>& v, std::tuple<Tp...>& a_current, s
 // Input: vectors coordinates and velocities. Output: vector of coordinates after one time-step.
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current;
+    std::vector<coord> q_previous = q;
     for (int i = 0; i < N; ++i) {
         a_current = total_particle_acceleration(q);
         coordinates_equations(q[i], v[i], a_current[i]);
@@ -384,25 +559,18 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
             std::cout << i <<'\t' << "Wow!" << std::endl;
             double debug_t = i;
             data_file("accelerations"+toString(i), a_next, debug_t);
-        }*/
+        }
+        std::cout << std::endl;*/
         velocities_equations(v[i], a_current[i], a_next[i]);
-        periodic_borders(q[i]);
     }
+    periodic_borders (q_previous, q);
+    //for (auto & i : q) periodic_borders(i);
     momentum_exchange(q, v);
 }
 
 
 
-template<typename T, size_t... Is>
-auto distance_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
-    return (std::sqrt((std::pow(std::get<Is>(t) - std::get<Is>(t1), 2) + ...)));
-}
 
-template <class Tuple>
-double distance (const Tuple& t, const Tuple& t1) {
-    constexpr auto size = std::tuple_size<Tuple>{};
-    return distance_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
-}
 
 // If two particles impact they exchange momentums of each other.
 // Input: vector coordinates, vector velocities. Last changes by reference.
@@ -416,16 +584,11 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
                 velocities[j] = buf;
                 ++colisions;
             }
-    //std::cout << colisions << std::endl;
+    std::cout << colisions << std::endl;
 }
 
 
-template<size_t Is = 0, typename... Tp>
-void vector_offset (std::tuple<Tp...>& vector, std::tuple<Tp...>& frame_of_reference, std::tuple<Tp...>& result) {
-    std::get<Is>(result) = std::get<Is>(vector) + std::get<Is>(frame_of_reference);
-    if constexpr(Is + 1 != sizeof...(Tp))
-        vector_offset<Is + 1>(vector, frame_of_reference, result);
-}
+
 
 coord minimal_distance (coord& q1, coord& q2, double& R_ij) {
     double test;
@@ -446,8 +609,7 @@ template<size_t Is = 0, typename... Tp>
 void acceleration_projections (std::tuple<Tp...>& a, std::tuple<Tp...>& q1, std::tuple<Tp...>& q2) {
     double R_ij;
     coord second_particle = std::move(minimal_distance(q1, q2, R_ij));
-    double F = (R_ij < R_max) ? single_force(std::get<Is>(second_particle)) / 2.0 : 0;
-    //std::cout << R_ij << std::endl;
+    double F = (R_ij <= R_max) ? single_force(std::get<Is>(second_particle)) / 2.0 : 0;
     std::get<Is>(a) += (std::isfinite(F) ? F/m : 0);
     if constexpr(Is + 1 != sizeof...(Tp))
         acceleration_projections<Is + 1>(a, q1, q2);
