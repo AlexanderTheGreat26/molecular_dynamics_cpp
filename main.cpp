@@ -126,14 +126,6 @@ void computing (std::string& name, std::vector<coord>& coordinates, std::vector<
                 double& E, double& t);
 
 
-// std::to_string not safe enough. So it's realization via streams. It will be used everywhere instead of std::to_string.
-template <typename T>
-std::string toString(T val){
-    std::ostringstream oss;
-    oss << val;
-    return oss.str();
-}
-
 
 template<size_t Is = 0, typename... Tp>
 void debug_tuple_output (std::tuple<Tp...>& t) {
@@ -229,14 +221,14 @@ void vector_creation (std::tuple<Tp...>& a, std::tuple<Tp...>& b, std::tuple<Tp.
 
 // Returns true if two tuples (t, t1) contains the same numbers.
 template<typename T, size_t... Is>
-bool equal_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+bool equal_tuples_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
     return ((is_equal(std::get<Is>(t), std::get<Is>(t1))) & ...);
 }
 
 template <class Tuple>
 bool equal_tuples (const Tuple& t, const Tuple& t1) {
     constexpr auto size = std::tuple_size<Tuple>{};
-    return equal_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
+    return equal_tuples_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
 }
 
 
@@ -248,10 +240,20 @@ void vector_offset (std::tuple<Tp...>& vector, std::tuple<Tp...>& frame_of_refer
         vector_offset<Is + 1>(vector, frame_of_reference, result);
 }
 
+
+// std::to_string not safe enough. So it's realization via streams. It will be used everywhere instead of std::to_string.
+template <typename T>
+std::string toString (T val) {
+    std::ostringstream oss;
+    oss << val;
+    return oss.str();
+}
+
+
 // Returns string contains tuple content.
 template<typename T, size_t... Is>
 std::string tuple_to_string_impl (T const& t, std::index_sequence<Is...>) {
-    return (((toString(std::get<Is>(t)) + '\t') + ...));
+    return ((toString(std::get<Is>(t)) + '\t') + ...);
 }
 
 template <class Tuple>
