@@ -78,14 +78,19 @@ std::vector<planes> area_borders = {std::make_tuple(0, 0, 1, left_border),
                                     std::make_tuple(1, 0, 0, right_border)};
 
 
-std::random_device rd;  // Will be used to obtain a seed for the random number engine
-std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
+//std::random_device rd;  // Will be used to obtain a seed for the random number engine
+//std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
 
 
 // Initial distributions
 std::vector<coord> initial_coordinates ();
 
 std::vector<coord> initial_velocities ();
+
+std::vector<coord> initial_coordinates_debug ();
+
+std::vector<coord> initial_velocities_debug ();
+
 
 
 double single_force (double& R);
@@ -113,6 +118,8 @@ bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2);
 void data_file (std::string data_type, std::vector<coord>& data, double& t);
 
 void data_files (std::string& name, std::vector<coord>& data, double& t);
+
+void data_files_debug (std::string& name, std::vector<coord>& data, double& t_debug, bool& flag);
 
 void clear_data (std::string& file_name);
 
@@ -143,13 +150,13 @@ void computing (striiing &name, std::vector<coord>& coordinates, std::vector<coo
 
 
 int main () {
-    std::vector<coord> coordinates = std::move(initial_coordinates());
-    std::vector<coord> velocities = std::move(initial_velocities());
+    std::vector<coord> coordinates = std::move(initial_coordinates_debug());
+    std::vector<coord> velocities = std::move(initial_velocities_debug());
     neighboring_cubes = std::move(areas_centers(characteristic_size));
     double E, E_init = N * m*std::pow(V_init, 2)/2.0;
     double t = 0;
     std::string name_trajectory = substance + "_coordinates";
-    std::string name_velocity = substance + "_trajectory";
+    std::string name_velocity = substance + "_velocity";
     std::string name_acceleration = substance + "_acceleration";
     if (!realtime) {
         std::string path_trajectory = std::move(exec("rm -rf trajectories && mkdir trajectories && cd trajectories && echo $PWD"));
@@ -333,7 +340,8 @@ void next_step_position (coord& q1, coord& q2) {
         coord intersection = std::move(intersection_point(q1, q2, A, B, C, D, q));
         vector_creation(q1, intersection, dq);
         r = vector_length(dq);
-        if (is_equal(cos_ab(dq, q), 1) && r < d) {
+        double error = 1.0e-10;
+        if (std::fabs(cos_ab(dq, q) - 1) < error && r < d) {
             closest_intersection = intersection;
             moving = dq;
             full_moving = q;
@@ -349,8 +357,10 @@ void next_step_position (coord& q1, coord& q2) {
         double B = std::get<1>(area_border);
         double C = std::get<2>(area_border);
         coord test_normal = std::make_tuple(A, B, C);
-        if (equal_tuples(normal, test_normal) && !equal_tuples(area_border, intersected_plane))
+        if (equal_tuples(normal, test_normal) && !equal_tuples(area_border, intersected_plane)) {
             opposite_plane = area_border;
+            break;
+        }
     }
     plane_projection(opposite_plane, closest_intersection);
     q2 = closest_intersection;
@@ -373,9 +383,11 @@ void computing (striiing &name, std::vector<coord>& coordinates, std::vector<coo
     std::string name_q = std::get<0>(name);
     std::string name_v = std::get<1>(name);
     std::string name_a = std::get<2>(name);
-
-    data_files(name_q, coordinates, t);
-    data_files(name_v, velocities, t);
+    double t_debug = 1.0;
+    bool flag = false;
+    data_files_debug(name_q, coordinates, t_debug, flag);
+    flag = false;
+    data_files_debug(name_v, velocities, t_debug, flag);
 
 
     //s//td::string path = std::move(exec("cd velocities && echo $PWD"));
@@ -406,7 +418,8 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
                                       "splot '-' u 1:2:3"};
     for (const auto& it : stuff)
         fprintf(gp, "%s\n", it.c_str());
-    double E, t;
+    double E;
+    double t; // !
     do {
         std::cout << t << std::endl;
         for (auto & coordinate : coordinates) {
@@ -489,6 +502,18 @@ void data_files (std::string& name, std::vector<coord>& data, double& t) {
         fout.open(name + '.' + toString(i), std::ios::app);
         std::string buf = std::move(tuple_to_string(data[i]));
         fout << buf << t << ((flag) ? "\n\n\n\n" + buf + "\n" : "\n");
+        fout.close();
+    }
+    flag = true;
+}
+
+void data_files_debug (std::string& name, std::vector<coord>& data, double& t_debug, bool& flag) {
+    //static bool flag = false;
+    for (int i = 0; i < data.size(); ++i) {
+        std::ofstream fout;
+        fout.open(name + '.' + toString(i), std::ios::app);
+        std::string buf = std::move(tuple_to_string(data[i]));
+        fout << buf << t_debug << ((flag) ? "\n\n\n\n" + buf + "\n" : "\n");
         fout.close();
     }
     flag = true;
@@ -586,7 +611,24 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
 }
 
 void Verlet_integration_debug (std::vector<coord>& q, std::vector<coord>& v, std::string& acceleration_files_name) {
-
+    static std::vector<coord> a_current = std::move(total_particle_acceleration(q));
+    static std::vector<coord> q_current;
+    double debug_t = 0;
+    bool flag = false;
+    data_files_debug(acceleration_files_name, a_current, debug_t, flag);
+    static bool first_step = true;
+    std::vector<coord> a_next;
+    for (int i = 0; i < N; ++i)
+        coordinates_equations(q[i], v[i], a_current[i]);
+    if (!first_step) {
+        a_next = std::move(total_particle_acceleration(q));
+        periodic_borders(q_current, q);
+        for (int i = 0; i < N; ++i)
+            velocities_equations(v[i], a_current[i], a_next[i]);
+        a_current = a_next;
+    }
+    first_step = false;
+    q_current = q;
 }
 
 
@@ -645,10 +687,10 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
     {
         std::vector<coord> acceleration_private;
         double a_x, a_y, a_z, R_ij;
-        coord a, second_particle;
 #pragma omp for nowait schedule(static)
         for (int i = 0; i < N; ++i) {
             a_x = a_y = a_z = 0;
+            coord a = std::make_tuple(0, 0, 0);
             for (int j = 0; j < N; ++j)
                 if (i != j) {
                     R_ij = 0; // Distance between two interaction particles. ATTENTION: takes on values in
@@ -684,8 +726,51 @@ coord velocity_direction (double& cos_psi, double& mu, double& cos_gamma) {
 }
 
 
+#include <iostream>
+
+std::vector<coord> initial_velocities_debug () {
+    double epsilon = 1.0 / N;
+    std::vector<coord> velocities;
+    coord direction;
+    //std::uniform_real_distribution<> dis(0.0, 1.0);
+    for (int i = 0; i < N; ++i) {
+        double mu, a, b, cos_psi, cos_gamma, d = 10;
+        do {
+            mu = 2 * epsilon * (rand()%(N+1)) - 1;
+            do {
+                a = 2 * epsilon * (rand()%(N+1)) - 1;
+                b = 2 * epsilon * (rand()%(N+1)) - 1;
+                d = std::pow(a, 2) + std::pow(b, 2);
+            } while (d > 1);
+            cos_psi = a / std::sqrt(d);
+            cos_gamma = std::sqrt(1.0 - (std::pow(mu, 2) + std::pow(cos_psi, 2))) *
+                    ((i%2 == 0) ? 1.0 : (-1.0));
+        } while (std::pow(mu, 2) + std::pow(cos_psi, 2) > 1);
+        velocities.emplace_back(std::move(velocity_direction(cos_psi, mu, cos_gamma)));
+    }
+    return velocities;
+}
+
+
+// Returns initial coordinates of particles evenly distributed over the volume.
+std::vector<coord> initial_coordinates_debug () {
+    std::cout << std::endl << right_border << std::endl;
+    std::vector<coord> coordinates;
+    //std::uniform_real_distribution<> dis(left_border, right_border);
+    //int width = characteristic_size
+    for (int i = 0; i < N; ++i) {
+        double x = left_border + 1.0e-11 * (rand() % 80298*2);
+        double y = left_border + 1.0e-11 * (rand() % 80298*2);
+        double z = left_border + 1.0e-11 * (rand() % 80298*2);
+        coordinates.emplace_back(std::move(std::make_tuple(x, y, z)));
+    }
+    return coordinates;
+}
+
+
+
 // Returns vector of velocities for every particle.
-std::vector<coord> initial_velocities () {
+/*std::vector<coord> initial_velocities () {
     std::vector<coord> velocities;
     coord direction;
     std::uniform_real_distribution<> dis(0.0, 1.0);
@@ -718,4 +803,4 @@ std::vector<coord> initial_coordinates () {
         coordinates.emplace_back(std::move(std::make_tuple(x, y, z)));
     }
     return coordinates;
-}
+}*/
