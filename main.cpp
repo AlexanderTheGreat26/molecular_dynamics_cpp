@@ -65,6 +65,9 @@ typedef std::tuple<double, double, double> coord;
 
 std::vector<coord> neighboring_cubes; // Contains coordinates of centers virtual areas
 
+std::vector<coord> areas_centers (double a);
+
+
 typedef std::tuple<double, double, double, double> planes;
 
 std::vector<planes> area_borders = {std::make_tuple(0, 0, 1, left_border),
@@ -79,12 +82,11 @@ std::random_device rd;  // Will be used to obtain a seed for the random number e
 std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
 
 
-
-
-
+// Initial distributions
 std::vector<coord> initial_coordinates ();
 
 std::vector<coord> initial_velocities ();
+
 
 double single_force (double& R);
 
@@ -92,15 +94,19 @@ coord minimal_distance (coord& q1, coord& q2, double& R_ij);
 
 std::vector<coord> total_particle_acceleration (std::vector<coord>& particles);
 
+double cos_ab (coord& a, coord& b);
+
 void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& velocities);
 
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
 
+double kinetic_energy_of_system (std::vector<coord>& velocities);
+
+
+// Technical functions.
 bool is_equal (double a, double b);
 
 bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2);
-
-double energy_of_system (std::vector<coord>& velocities);
 
 void data_file (std::string data_type, std::vector<coord>& data, double& t);
 
@@ -110,6 +116,7 @@ void clear_data (std::string& file_name);
 
 std::string exec (std::string str);
 
+
 void plot (std::string name, double min, double max, int number_of_points, int& steps);
 
 void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& velocities,
@@ -118,16 +125,15 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
 void computing (std::string& name, std::vector<coord>& coordinates, std::vector<coord>& velocities,
                 double& E, double& t);
 
-std::vector<coord> areas_centers (double a);
 
-
-#include <sstream>
+// std::to_string not safe enough. So it's realization via streams. It will be used everywhere instead of std::to_string.
 template <typename T>
 std::string toString(T val){
     std::ostringstream oss;
     oss << val;
     return oss.str();
 }
+
 
 template<size_t Is = 0, typename... Tp>
 void debug_tuple_output (std::tuple<Tp...>& t) {
@@ -157,7 +163,7 @@ int main () {
         data_files (name, coordinates, t);
         Verlet_integration(coordinates, velocities);
         //std::cout << std::get<0>(velocities[0]) << std::endl;
-        E = energy_of_system(velocities);
+        E = kinetic_energy_of_system(velocities);
         std::cout << E - E_init << '\t' << t << std::endl;
         t += dt;
         ++step;
@@ -207,12 +213,13 @@ double scalar_product (const Tuple& t1, const Tuple& t2) {
 }
 
 
+// Returns the cosine of angle between two vectors (a, b).
 double cos_ab (coord& a, coord& b) {
     return scalar_product(a, b) / (vector_length(a) * vector_length(b));
 }
 
 
-
+// result is a vector whose begin is point a and end is point b.
 template<size_t Is = 0, typename... Tp>
 void vector_creation (std::tuple<Tp...>& a, std::tuple<Tp...>& b, std::tuple<Tp...>& result) {
     std::get<Is>(result) = std::get<Is>(b) - std::get<Is>(a);
@@ -220,7 +227,51 @@ void vector_creation (std::tuple<Tp...>& a, std::tuple<Tp...>& b, std::tuple<Tp.
         vector_creation<Is + 1>(a, b, result);
 }
 
+// Returns true if two tuples (t, t1) contains the same numbers.
+template<typename T, size_t... Is>
+bool equal_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+    return ((is_equal(std::get<Is>(t), std::get<Is>(t1))) & ...);
+}
 
+template <class Tuple>
+bool equal_tuples (const Tuple& t, const Tuple& t1) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return equal_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
+}
+
+
+// Offsets the vector to the frame of reference -- result vector = result.
+template<size_t Is = 0, typename... Tp>
+void vector_offset (std::tuple<Tp...>& vector, std::tuple<Tp...>& frame_of_reference, std::tuple<Tp...>& result) {
+    std::get<Is>(result) = std::get<Is>(vector) + std::get<Is>(frame_of_reference);
+    if constexpr(Is + 1 != sizeof...(Tp))
+        vector_offset<Is + 1>(vector, frame_of_reference, result);
+}
+
+// Returns string contains tuple content.
+template<typename T, size_t... Is>
+std::string tuple_to_string_impl (T const& t, std::index_sequence<Is...>) {
+    return (((toString(std::get<Is>(t)) + '\t') + ...));
+}
+
+template <class Tuple>
+std::string tuple_to_string (const Tuple& t) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return tuple_to_string_impl(t, std::make_index_sequence<size>{});
+}
+
+
+// Returns projection of point (q) to plane recorded in the form (A, B, C, D).
+template<size_t Is = 0, typename... Tp>
+void plane_projection (std::tuple<Tp...>& plane, coord& q) {
+    if (!is_equal(std::get<Is>(plane), 0))
+        std::get<Is>(q) *= (-1);
+    if constexpr(Is + 2 != sizeof...(Tp))
+        plane_projection<Is + 1>(plane, q);
+}
+
+
+// Returns the point of intersection the line (q1 q2) and the plane Ax+By+Cz+D = 0. r = q2 - q1.
 coord intersection_point (coord& q1, coord& q2, double& A, double& B, double& C, double& D, coord& r) {
 
     double x0 = std::get<0>(q1);
@@ -242,6 +293,7 @@ coord intersection_point (coord& q1, coord& q2, double& A, double& B, double& C,
 }
 
 
+// The same as a last one but input only line (q1, q2) and plane recorde in form (A, B, C, D).
 coord intersection_points_for_planes (coord& q1, coord& q2, planes& plane) {
     coord r;
     vector_creation(q1, q2, r);
@@ -253,29 +305,9 @@ coord intersection_points_for_planes (coord& q1, coord& q2, planes& plane) {
 }
 
 
-template<typename T, size_t... Is>
-auto equal_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
-    return ((is_equal(std::get<Is>(t), std::get<Is>(t1))) & ...);
-}
-
-template <class Tuple>
-bool equal_tuples (const Tuple& t, const Tuple& t1) {
-    constexpr auto size = std::tuple_size<Tuple>{};
-    return equal_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
-}
-
-
-template<size_t Is = 0, typename... Tp>
-void vector_offset (std::tuple<Tp...>& vector, std::tuple<Tp...>& frame_of_reference, std::tuple<Tp...>& result) {
-    std::get<Is>(result) = std::get<Is>(vector) + std::get<Is>(frame_of_reference);
-    if constexpr(Is + 1 != sizeof...(Tp))
-        vector_offset<Is + 1>(vector, frame_of_reference, result);
-}
-
-
-coord next_step_position (coord& q1, coord& q2) {
+void next_step_position (coord& q1, coord& q2) {
     auto intersected_plane = area_borders[0];
-    coord q, dq, closest, normal, moving, full_moving;
+    coord q, dq, closest_intersection, normal, moving, full_moving;
     double r, d = 1.0e308;
     for (auto & area_border : area_borders) {
         double A = std::get<0>(area_border);
@@ -287,7 +319,7 @@ coord next_step_position (coord& q1, coord& q2) {
         vector_creation(q1, intersection, dq);
         r = vector_length(dq);
         if (is_equal(cos_ab(dq, q), 1) && r < d) {
-            closest = intersection;
+            closest_intersection = intersection;
             moving = dq;
             full_moving = q;
             d = r;
@@ -305,24 +337,12 @@ coord next_step_position (coord& q1, coord& q2) {
         if (equal_tuples(normal, test_normal) && !equal_tuples(area_border, intersected_plane))
             opposite_plane = area_border;
     }
-    coord M = std::move(intersection_points_for_planes(q1, q2, opposite_plane));
-    double way = characteristic_size / cos_ab(normal, moving);
-    double fraction = modf(way, &r); // The final moving relatively q1.
-    coord between_planes;
-    vector_creation(M, closest, between_planes);
-    double lambda = fraction / vector_length(between_planes);
-    coord final_moving_vector = std::make_tuple(std::get<0>(between_planes) * lambda,
-                                                std::get<1>(between_planes) * lambda,
-                                                std::get<2>(between_planes) * lambda);
-    coord ans;
-    vector_offset(final_moving_vector, M, ans);
-    return ans;
+    plane_projection(opposite_plane, closest_intersection);
+    q2 = closest_intersection;
 }
 
 
-
-
-
+// Returns the std::vector of coordinates of main area's images.
 std::vector<coord> areas_centers (double a) {
     std::vector<std::tuple<double, double, double>> centers;
     for (int k = 0; k < 3; ++k)
@@ -343,20 +363,8 @@ void computing (std::string& name, std::vector<coord>& coordinates, std::vector<
 
 
     Verlet_integration(coordinates, velocities);
-    E = energy_of_system(velocities);
+    E = kinetic_energy_of_system(velocities);
     t += dt;
-}
-
-
-template<typename T, size_t... Is>
-std::string tuple_to_string_impl (T const& t, std::index_sequence<Is...>) {
-    return (((toString(std::get<Is>(t)) + '\t') + ...));
-}
-
-template <class Tuple>
-std::string tuple_to_string (const Tuple& t) {
-    constexpr auto size = std::tuple_size<Tuple>{};
-    return tuple_to_string_impl(t, std::make_index_sequence<size>{});
 }
 
 
@@ -391,6 +399,7 @@ void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& ve
     pclose(gp);
 }
 
+
 // Creates a gif-file with molecular motion animation.
 void plot (std::string name, double min, double max, int number_of_points, int& steps) {
     std::string range = "[" + toString(min) + ":" + toString(max) + "]";
@@ -407,14 +416,15 @@ void plot (std::string name, double min, double max, int number_of_points, int& 
                                       "set ticslevel 0",
                                       "set border 4095",
                                       "do for [i = 0:" + toString(number_of_points-1) + "] {" ,
-                                            "do for [j = 0:" + toString(steps-1) + "] {",
-                                                "splot \'" + name + ".\'.i using 1:2:3 index j w linespoints pt 7,/",
+                                      "do for [j = 0:" + toString(steps-1) + "] {",
+                                      "splot \'" + name + ".\'.i using 1:2:3 index j w linespoints pt 7,/",
                                       "} \ }",
                                       "q"};
     for (const auto& it : stuff)
         fprintf(gp, "%s\n", it.c_str());
     pclose(gp);
 }
+
 
 //The function returns the terminal ans. Input - string for term.
 std::string exec (std::string str) {
@@ -429,7 +439,7 @@ std::string exec (std::string str) {
     return result;
 }
 
-
+// Clears the file.
 void clear_data (std::string& file_name) {
     std::ofstream fout;
     fout.open(file_name, std::ofstream::out | std::ofstream::trunc);
@@ -462,22 +472,12 @@ void data_files (std::string& name, std::vector<coord>& data, double& t) {
     flag = true;
 }
 
-template<typename T, size_t... Is>
-auto scalar_square_impl(T const& t, std::index_sequence<Is...>) {
-    return ((std::pow(std::get<Is>(t), 2) + ...));
-}
-
-template <class Tuple>
-double scalar_square (const Tuple& t) {
-    constexpr auto size = std::tuple_size<Tuple>{};
-    return scalar_square_impl(t, std::make_index_sequence<size>{});
-}
 
 // Used for circuit stability check.
-double energy_of_system (std::vector<coord>& velocities) {
+double kinetic_energy_of_system (std::vector<coord>& velocities) {
     double E = 0;
     for (int i = 0; i < N; ++i) {
-        double v2 = scalar_square(velocities[i]);
+        double v2 = scalar_product(velocities[i], velocities[i]);
         if (std::isfinite(v2))
             E += m * v2 / 2.0;
     }
@@ -485,36 +485,28 @@ double energy_of_system (std::vector<coord>& velocities) {
 }
 
 
+// We can't compare two doubles without an error. So it returns true if the distance between two doubles less than
+// standard error.
 bool is_equal (double a, double b) {
     return std::fabs(a - b) < std::numeric_limits<double>::epsilon();
 }
 
 
-
-// Function returns true, if vectors of tuples are same. Estimates with error of computer representation of doubles.
+// Function returns true, if std::vectors of tuples are same. Estimates with error of computer representation of doubles.
 bool is_same (std::vector<coord>& a_1, std::vector<coord>& a_2) {
     bool ans = true;
     int i = 0;
     do {
         ans &= equal_tuples(a_1[i], a_2[i]);
         ++i;
-    } while (ans && i < N);
+    } while (ans && i < a_1.size());
     return ans;
 }
 
-
-/*template<size_t Is = 0, typename... Tp>
-void border_intersection (std::tuple<Tp...>& t) {
-    if (std::fabs(std::get<Is>(t)) > right_border)
-
-    if constexpr(Is + 1 != sizeof...(Tp))
-        border_intersection<Is + 1>(t);
-}*/
-
-
+// Template returns true if particle outside the main area.
 template<typename T, size_t... Is>
 bool border_intersection_impl (T const& t, std::index_sequence<Is...>) {
-    return ((std::fabs(std::get<Is>(t)) > right_border) & ...);
+    return ((std::fabs(std::get<Is>(t)) > right_border) | ...);
 }
 
 template <class Tuple>
@@ -527,19 +519,20 @@ bool border_intersection (const Tuple& t) {
 void periodic_borders (std::vector<coord>& q1, std::vector<coord>& q2) {
     for (int i = 0; i < q2.size(); ++i)
         if (border_intersection(q2[i]))
-            q2[i] = std::move(next_step_position(q1[i], q2[i]));
+            next_step_position(q1[i], q2[i]);
 }
 
 
+// Template contains the equation of movement for particles.
 template<size_t Is = 0, typename... Tp>
 void coordinates_equations (std::tuple<Tp...>& q, std::tuple<Tp...>& v, std::tuple<Tp...>& a) {
     std::get<Is>(q) += std::get<Is>(v)*dt + std::get<Is>(a)*std::pow(dt, 2) / 2.0;
-    //debug_tuple_output(q);
-    //std::cout << std::get<Is>(v) << std::endl;
     if constexpr(Is + 1 != sizeof...(Tp))
         coordinates_equations<Is + 1>(q, v, a);
 }
 
+
+// Template contains the equation for velocities of particles.
 template<size_t Is = 0, typename... Tp>
 void velocities_equations (std::tuple<Tp...>& v, std::tuple<Tp...>& a_current, std::tuple<Tp...>& a_next) {
     std::get<Is>(v) += (std::get<Is>(a_current) + std::get<Is>(a_next)) / 2.0 * dt;
@@ -549,23 +542,41 @@ void velocities_equations (std::tuple<Tp...>& v, std::tuple<Tp...>& a_current, s
 
 // Input: vectors coordinates and velocities. Output: vector of coordinates after one time-step.
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
-    std::vector<coord> a_next, a_current;
-    std::vector<coord> q_previous = q;
+    static bool flag = false;
+    std::vector<coord> a_next, a_current, q_previous;
+    std::vector<coord> a (N);
+    if (flag) q_previous = q;
+
+    //std::string PATH = exec("\'cd trajectories && echo $PWD\'");
+    std::string PATH = "/home/alexander/CLionProjects/molecular_dynamics-release/a/";
+
+
     for (int i = 0; i < N; ++i) {
-        a_current = total_particle_acceleration(q);
+        a_current = std::move(total_particle_acceleration(q));
         coordinates_equations(q[i], v[i], a_current[i]);
-        a_next = total_particle_acceleration(q);
-        /*if (!is_same(a_current, a_next)) {
-            std::cout << i <<'\t' << "Wow!" << std::endl;
-            double debug_t = i;
-            data_file("accelerations"+toString(i), a_next, debug_t);
-        }
-        std::cout << std::endl;*/
+        a_next = std::move(total_particle_acceleration(q));
+
+
+        vector_creation(a_current[i], a_next[i], a[i]);
+        std::string name = "a";
+        name = PATH + name;
+        double t = dt;
+        data_files(name, a, t);
+
+
+
         velocities_equations(v[i], a_current[i], a_next[i]);
     }
-    periodic_borders (q_previous, q);
+    if (flag) periodic_borders(q_previous, q);
+    flag = true;
+
+
+
+
     //for (auto & i : q) periodic_borders(i);
+
     momentum_exchange(q, v);
+
 }
 
 
@@ -588,8 +599,7 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
 }
 
 
-
-
+// The function defines the closest "second" particle from the main and image-area.
 coord minimal_distance (coord& q1, coord& q2, double& R_ij) {
     double test;
     R_ij = 1.0e300;
@@ -605,9 +615,12 @@ coord minimal_distance (coord& q1, coord& q2, double& R_ij) {
     return result;
 }
 
+
+//
 template<size_t Is = 0, typename... Tp>
 void acceleration_projections (std::tuple<Tp...>& a, std::tuple<Tp...>& q1, std::tuple<Tp...>& q2) {
-    double R_ij;
+    double R_ij; // Distance between two interaction particles. ATTENTION: takes on values in
+    // coord minimal_distance (coord& q1, coord& q2, double& R_ij) via reference!
     coord second_particle = std::move(minimal_distance(q1, q2, R_ij));
     double F = (R_ij <= R_max) ? single_force(std::get<Is>(second_particle)) / 2.0 : 0;
     std::get<Is>(a) += (std::isfinite(F) ? F/m : 0);
@@ -654,12 +667,13 @@ double single_force (double& R) {
     return 24.0 * Theta / R * (2.0 * pow(sigma / R, 12.0) - pow(sigma / R, 6.0));
 }
 
-
+// Returns the projection of initial velocity to coordinate axes.
 coord velocity_direction (double& cos_psi, double& mu, double& cos_gamma) {
     return std::make_tuple(cos_psi*V_init, mu*V_init, cos_gamma*V_init);
 }
 
-// Returns vector of velocities for every particles.
+
+// Returns vector of velocities for every particle.
 std::vector<coord> initial_velocities () {
     std::vector<coord> velocities;
     coord direction;
