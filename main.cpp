@@ -100,6 +100,8 @@ void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& vel
 
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
 
+void Verlet_integration_debug (std::vector<coord>& q, std::vector<coord>& v, std::string& accreleration_files_name);
+
 double kinetic_energy_of_system (std::vector<coord>& velocities);
 
 
@@ -119,12 +121,6 @@ std::string exec (std::string str);
 
 void plot (std::string name, double min, double max, int number_of_points, int& steps);
 
-void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& velocities,
-                         std::string name, double min, double max, int number_of_points, double& E_init);
-
-void computing (std::string& name, std::vector<coord>& coordinates, std::vector<coord>& velocities,
-                double& E, double& t);
-
 
 
 template<size_t Is = 0, typename... Tp>
@@ -132,8 +128,18 @@ void debug_tuple_output (std::tuple<Tp...>& t) {
     std::cout << std::endl;
     std::cout << std::get<Is>(t) << '\t';
     if constexpr(Is + 1 != sizeof...(Tp))
-        debug_tuple_output<Is + 1>(t);
+    debug_tuple_output<Is + 1>(t);
 }
+
+typedef std::tuple<std::string, std::string, std::string> striiing;
+
+
+
+void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& velocities,
+                         striiing name, double min, double max, int number_of_points, double& E_init);
+
+void computing (striiing &name, std::vector<coord>& coordinates, std::vector<coord>& velocities,
+                double& E, double& t);
 
 
 int main () {
@@ -142,12 +148,19 @@ int main () {
     neighboring_cubes = std::move(areas_centers(characteristic_size));
     double E, E_init = N * m*std::pow(V_init, 2)/2.0;
     double t = 0;
-    std::string name = "Ar_coordinates";
+    std::string name_trajectory = substance + "_coordinates";
+    std::string name_velocity = substance + "_trajectory";
+    std::string name_acceleration = substance + "_acceleration";
     if (!realtime) {
-        std::string path = std::move(exec("rm -rf trajectories && mkdir trajectories && cd trajectories && echo $PWD"));
-        std::cout << path << std::endl;
-        name = path + '/' + name;
+        std::string path_trajectory = std::move(exec("rm -rf trajectories && mkdir trajectories && cd trajectories && echo $PWD"));
+        std::string path_velocity = std::move(exec("rm -rf velocities && mkdir velocities && cd velocities && echo $PWD"));
+        std::string path_acceleration = std::move(exec("rm -rf accelerations && mkdir accelerations && cd accelerations && echo $PWD"));
+        name_trajectory = path_trajectory + '/' + name_trajectory;
+        name_velocity = path_velocity + '/' + name_velocity;
+        name_acceleration = path_acceleration + '/' + name_acceleration;
+        //auto name = std::make_tuple(name_trajectory, name_velocity, name_acceleration);
     }
+    striiing name = std::make_tuple(name_trajectory, name_velocity, name_acceleration);
     std::cout << R_0 << std::endl;
     int step = 0;
     /*data_files (name, coordinates, t);
@@ -355,23 +368,30 @@ std::vector<coord> areas_centers (double a) {
 }
 
 
-void computing (std::string& name, std::vector<coord>& coordinates, std::vector<coord>& velocities,
+void computing (striiing &name, std::vector<coord>& coordinates, std::vector<coord>& velocities,
                 double& E, double& t) {
-    data_files(name, coordinates, t);
+    std::string name_q = std::get<0>(name);
+    std::string name_v = std::get<1>(name);
+    std::string name_a = std::get<2>(name);
 
-    std::string path = std::move(exec("cd velocities && echo $PWD"));
-    std::string V_names = path + "/velocities";
-    data_files(V_names, velocities, t);
+    data_files(name_q, coordinates, t);
+    data_files(name_v, velocities, t);
 
 
-    Verlet_integration(coordinates, velocities);
+    //s//td::string path = std::move(exec("cd velocities && echo $PWD"));
+    //std::string V_names = path + "/velocities";
+    //data_files(V_names, velocities, t);
+
+    Verlet_integration_debug(coordinates, velocities, name_a);
+
+    //Verlet_integration(coordinates, velocities);
     E = kinetic_energy_of_system(velocities);
     t += dt;
 }
 
 
 void real_time_plotting (std::vector<coord>& coordinates, std::vector<coord>& velocities,
-                         std::string name, double min, double max, int number_of_points, double& E_init) {
+                         striiing name, double min, double max, int number_of_points, double& E_init) {
     std::string range = "[" + toString(min) + ":" + toString(max) + "]";
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
@@ -548,36 +568,24 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     std::vector<coord> a_next, a_current, q_previous;
     std::vector<coord> a (N);
     if (flag) q_previous = q;
-
-    //std::string PATH = exec("\'cd trajectories && echo $PWD\'");
-    std::string PATH = "/home/alexander/CLionProjects/molecular_dynamics-release/a/";
-
-
     for (int i = 0; i < N; ++i) {
         a_current = std::move(total_particle_acceleration(q));
         coordinates_equations(q[i], v[i], a_current[i]);
         a_next = std::move(total_particle_acceleration(q));
-
-
         vector_creation(a_current[i], a_next[i], a[i]);
-        std::string name = "a";
-        name = PATH + name;
+//        std::string name = "a";
+//        name = PATH + name;
         double t = dt;
-        data_files(name, a, t);
-
-
-
-        velocities_equations(v[i], a_current[i], a_next[i]);
+//        data_files(name, a, t);
+      velocities_equations(v[i], a_current[i], a_next[i]);
     }
     if (flag) periodic_borders(q_previous, q);
     flag = true;
-
-
-
-
     //for (auto & i : q) periodic_borders(i);
-
     momentum_exchange(q, v);
+}
+
+void Verlet_integration_debug (std::vector<coord>& q, std::vector<coord>& v, std::string& acceleration_files_name) {
 
 }
 
@@ -588,16 +596,16 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
 // If two particles impact they exchange momentums of each other.
 // Input: vector coordinates, vector velocities. Last changes by reference.
 void momentum_exchange (std::vector<coord>& coordinates, std::vector<coord>& velocities) {
-    static int colisions = 0;
+    //static int colisions = 0;
     for (int i = 0; i < N; ++i)
         for (int j = 0; j < N; ++j)
             if (distance(coordinates[i], coordinates[j]) <= 2.0*R_Ar && i != j) {
                 coord buf = velocities[i];
                 velocities[i] = velocities[j];
                 velocities[j] = buf;
-                ++colisions;
+                //++colisions;
             }
-    std::cout << colisions << std::endl;
+    //std::cout << colisions << std::endl;
 }
 
 
@@ -618,17 +626,15 @@ coord minimal_distance (coord& q1, coord& q2, double& R_ij) {
 }
 
 
-//
+// Returns the projections of acceleration of particle q1 to coordinate axes.
 template<size_t Is = 0, typename... Tp>
-void acceleration_projections (std::tuple<Tp...>& a, std::tuple<Tp...>& q1, std::tuple<Tp...>& q2) {
-    double R_ij; // Distance between two interaction particles. ATTENTION: takes on values in
-    // coord minimal_distance (coord& q1, coord& q2, double& R_ij) via reference!
-    coord second_particle = std::move(minimal_distance(q1, q2, R_ij));
-    double F = (R_ij <= R_max) ? single_force(std::get<Is>(second_particle)) / 2.0 : 0;
+void acceleration_projections (std::tuple<Tp...>& a, std::tuple<Tp...>& q1, std::tuple<Tp...>& q2, double& distance) {
+    double F = (distance <= R_max) ? single_force(std::get<Is>(q2)) / 2.0 : 0;
     std::get<Is>(a) += (std::isfinite(F) ? F/m : 0);
     if constexpr(Is + 1 != sizeof...(Tp))
-        acceleration_projections<Is + 1>(a, q1, q2);
+        acceleration_projections<Is + 1>(a, q1, q2, distance);
 }
+
 
 /* Returns vector of accelerations for particles. It's the most time-consuming operation, so it computing in parallels
  * via omp.h. I don't know what more effective: using it in parallel or just using -O3 flag.
@@ -638,14 +644,17 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
 #pragma omp parallel
     {
         std::vector<coord> acceleration_private;
-        double a_x, a_y, a_z;
-        coord a;
+        double a_x, a_y, a_z, R_ij;
+        coord a, second_particle;
 #pragma omp for nowait schedule(static)
         for (int i = 0; i < N; ++i) {
             a_x = a_y = a_z = 0;
             for (int j = 0; j < N; ++j)
                 if (i != j) {
-                    acceleration_projections(a, particles[i], particles[j]);
+                    R_ij = 0; // Distance between two interaction particles. ATTENTION: takes on values in
+                              // coord minimal_distance (coord& q1, coord& q2, double& R_ij) via reference!
+                    coord second_particle = std::move(minimal_distance(particles[i], particles[j], R_ij));
+                    acceleration_projections(a, particles[i], second_particle, R_ij);
                     //a_x += single_force(std::get<0>(particles[i]) - std::get<0>(particles[j])) / m;
                     //a_y += single_force(std::get<1>(particles[i]) - std::get<1>(particles[j])) / m;
                     //a_z += single_force(std::get<2>(particles[i]) - std::get<2>(particles[j])) / m;
@@ -690,8 +699,8 @@ std::vector<coord> initial_velocities () {
                 d = std::pow(a, 2) + std::pow(b, 2);
             } while (d > 1);
             cos_psi = a / std::sqrt(d);
-            cos_gamma = std::sqrt(1.0 - (std::pow(mu, 2) + std::pow(cos_psi, 2)))*
-                    ((dis(gen) > 0.5) ? 1 : (-1));
+            cos_gamma = std::sqrt(1.0 - (std::pow(mu, 2) + std::pow(cos_psi, 2))) *
+                    ((dis(gen) > 0.5) ? 1.0 : (-1.0));
         } while (std::pow(mu, 2) + std::pow(cos_psi, 2) > 1);
         velocities.emplace_back(std::move(velocity_direction(cos_psi, mu, cos_gamma)));
     }
