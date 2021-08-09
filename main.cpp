@@ -8,6 +8,7 @@
  * Graphics realised via gnuplot.
  * */
 
+
 #include <iostream>
 #include <cmath>
 #include <random>
@@ -195,7 +196,7 @@ double distance_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::
 }
 
 template <class Tuple>
-double distance (const Tuple& t, const Tuple& t1) {
+        double distance (const Tuple& t, const Tuple& t1) {
     constexpr auto size = std::tuple_size<Tuple>{};
     return distance_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
 }
@@ -207,7 +208,7 @@ double vector_length_impl (T const& t, std::index_sequence<Is...>) {
 }
 
 template <class Tuple>
-double vector_length (const Tuple& t) {
+        double vector_length (const Tuple& t) {
     constexpr auto size = std::tuple_size<Tuple>{};
     return vector_length_impl(t, std::make_index_sequence<size>{});
 }
@@ -219,7 +220,7 @@ double scalar_product_impl (T const& t1, std::index_sequence<Is...>, T const& t2
 }
 
 template <class Tuple>
-double scalar_product (const Tuple& t1, const Tuple& t2) {
+        double scalar_product (const Tuple& t1, const Tuple& t2) {
     constexpr auto size = std::tuple_size<Tuple>{};
     return scalar_product_impl(t1, std::make_index_sequence<size>{}, t2, std::make_index_sequence<size>{});
 }
@@ -236,7 +237,7 @@ template<size_t Is = 0, typename... Tp>
 void vector_creation (std::tuple<Tp...>& a, std::tuple<Tp...>& b, std::tuple<Tp...>& result) {
     std::get<Is>(result) = std::get<Is>(b) - std::get<Is>(a);
     if constexpr(Is + 1 != sizeof...(Tp))
-        vector_creation<Is + 1>(a, b, result);
+    vector_creation<Is + 1>(a, b, result);
 }
 
 // Returns true if two tuples (t, t1) contains the same numbers.
@@ -246,7 +247,7 @@ bool equal_tuples_impl (T const& t, T const& t1, std::index_sequence<Is...>, std
 }
 
 template <class Tuple>
-bool equal_tuples (const Tuple& t, const Tuple& t1) {
+        bool equal_tuples (const Tuple& t, const Tuple& t1) {
     constexpr auto size = std::tuple_size<Tuple>{};
     return equal_tuples_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
 }
@@ -257,7 +258,7 @@ template<size_t Is = 0, typename... Tp>
 void vector_offset (std::tuple<Tp...>& vector, std::tuple<Tp...>& frame_of_reference, std::tuple<Tp...>& result) {
     std::get<Is>(result) = std::get<Is>(vector) + std::get<Is>(frame_of_reference);
     if constexpr(Is + 1 != sizeof...(Tp))
-        vector_offset<Is + 1>(vector, frame_of_reference, result);
+    vector_offset<Is + 1>(vector, frame_of_reference, result);
 }
 
 
@@ -277,7 +278,7 @@ std::string tuple_to_string_impl (T const& t, std::index_sequence<Is...>) {
 }
 
 template <class Tuple>
-std::string tuple_to_string (const Tuple& t) {
+        std::string tuple_to_string (const Tuple& t) {
     constexpr auto size = std::tuple_size<Tuple>{};
     return tuple_to_string_impl(t, std::make_index_sequence<size>{});
 }
@@ -289,7 +290,7 @@ void plane_projection (std::tuple<Tp...>& plane, coord& q) {
     if (!is_equal(std::get<Is>(plane), 0))
         std::get<Is>(q) *= (-1);
     if constexpr(Is + 2 != sizeof...(Tp))
-        plane_projection<Is + 1>(plane, q);
+    plane_projection<Is + 1>(plane, q);
 }
 
 
@@ -328,8 +329,10 @@ coord intersection_points_for_planes (coord& q1, coord& q2, planes& plane) {
 
 
 void next_step_position (coord& q1, coord& q2) {
+    coord test = std::make_tuple(0, 0, 0);
+
     auto intersected_plane = area_borders[0];
-    coord q, dq, closest_intersection, normal, moving, full_moving;
+    coord q, dq, closest_intersection, normal, moving, full_moving, intersection;
     double r, d = 1.0e308;
     for (auto & area_border : area_borders) {
         double A = std::get<0>(area_border);
@@ -337,19 +340,32 @@ void next_step_position (coord& q1, coord& q2) {
         double C = std::get<2>(area_border);
         double D = std::get<3>(area_border);
         vector_creation(q1, q2, q);
-        coord intersection = std::move(intersection_point(q1, q2, A, B, C, D, q));
+        intersection = std::move(intersection_point(q1, q2, A, B, C, D, q));
         vector_creation(q1, intersection, dq);
         r = vector_length(dq);
-        double error = 1.0e-10;
-        if (std::fabs(cos_ab(dq, q) - 1) < error && r < d) {
+        double c = cos_ab(dq, q);
+        bool testflag = is_equal(cos_ab(dq, q), 1.0);
+        double error = 1.0e-10; // !!!
+        if (std::fabs(cos_ab(dq, q) -  1.0) < error && r < d) { // !!!
             closest_intersection = intersection;
+
+
+
+            debug_tuple_output(q1);
+            std::cout << std::endl;
+            debug_tuple_output(q1);
             moving = dq;
             full_moving = q;
             d = r;
             normal = std::make_tuple(A, B, C);
             intersected_plane = area_border;
+            debug_tuple_output(q2);
         }
     }
+
+    if (equal_tuples(closest_intersection, test))
+        std::cout << equal_tuples(q1, q2) << std::boolalpha << '\t' <<  "Fuck!\n";
+
 
     auto opposite_plane = intersected_plane;
     for (auto & area_border : area_borders) {
@@ -364,6 +380,63 @@ void next_step_position (coord& q1, coord& q2) {
     }
     plane_projection(opposite_plane, closest_intersection);
     q2 = closest_intersection;
+    std::cout << "q2:\t";
+    debug_tuple_output(q2);
+}
+
+
+coord next_step_position_debug (coord q1, coord q2) {
+    coord test = std::make_tuple(0, 0, 0);
+
+    auto intersected_plane = area_borders[0];
+    coord q, dq, closest_intersection, normal, moving, full_moving, intersection;
+    double r, d = 1.0e308;
+    for (auto & area_border : area_borders) {
+        double A = std::get<0>(area_border);
+        double B = std::get<1>(area_border);
+        double C = std::get<2>(area_border);
+        double D = std::get<3>(area_border);
+        vector_creation(q1, q2, q);
+        intersection = std::move(intersection_point(q1, q2, A, B, C, D, q));
+        vector_creation(q1, intersection, dq);
+        r = vector_length(dq);
+        if (is_equal(cos_ab(dq, q), 1.0) && r < d && !equal_tuples(q1, intersection) && !equal_tuples(q2, intersection)) {
+            closest_intersection = intersection;
+
+
+
+            debug_tuple_output(q1);
+            std::cout << std::endl;
+            debug_tuple_output(q1);
+            moving = dq;
+            full_moving = q;
+            d = r;
+            normal = std::make_tuple(A, B, C);
+            intersected_plane = area_border;
+            debug_tuple_output(q2);
+        }
+    }
+
+    if (equal_tuples(closest_intersection, test))
+        std::cout << equal_tuples(q1, q2) << std::boolalpha << '\t' <<  "Fuck!\n";
+
+
+    auto opposite_plane = intersected_plane;
+    for (auto & area_border : area_borders) {
+        double A = std::get<0>(area_border);
+        double B = std::get<1>(area_border);
+        double C = std::get<2>(area_border);
+        coord test_normal = std::make_tuple(A, B, C);
+        if (equal_tuples(normal, test_normal) && !equal_tuples(area_border, intersected_plane)) {
+            opposite_plane = area_border;
+            break;
+        }
+    }
+    plane_projection(opposite_plane, closest_intersection);
+    //q2 = closest_intersection;
+    std::cout << "q2:\t";
+    debug_tuple_output(closest_intersection);
+    return closest_intersection;
 }
 
 
@@ -374,7 +447,7 @@ std::vector<coord> areas_centers (double a) {
         for (int j = 0; j < 3; ++j)
             for (int i = 0; i < 3; ++i)
                 centers.emplace_back(std::make_tuple(-a + i*a, -a + j*a, -a + k*a));
-    return centers;
+            return centers;
 }
 
 
@@ -557,16 +630,26 @@ bool border_intersection_impl (T const& t, std::index_sequence<Is...>) {
 }
 
 template <class Tuple>
-bool border_intersection (const Tuple& t) {
+        bool border_intersection (const Tuple& t) {
     constexpr auto size = std::tuple_size<Tuple>{};
     return border_intersection_impl(t, std::make_index_sequence<size>{});
 }
 
 
 void periodic_borders (std::vector<coord>& q1, std::vector<coord>& q2) {
+    coord test = std::make_tuple(0, 0, 0);
     for (int i = 0; i < q2.size(); ++i)
-        if (border_intersection(q2[i]))
+        if (border_intersection(q2[i])) {
+            if (i == 68)  {
+                //std::cout << std::endl ;
+                debug_tuple_output(q2[i]);
+                //std::cout << std::endl;
+            }
             next_step_position(q1[i], q2[i]);
+            //q2[i] = std::move(next_step_position_debug(q1[i], q2[i]));
+            //if (equal_tuples(q2[i], test))
+            //    std::cout << "BUG:\t" << i << std::endl;
+        }
 }
 
 
@@ -575,7 +658,7 @@ template<size_t Is = 0, typename... Tp>
 void coordinates_equations (std::tuple<Tp...>& q, std::tuple<Tp...>& v, std::tuple<Tp...>& a) {
     std::get<Is>(q) += std::get<Is>(v)*dt + std::get<Is>(a)*std::pow(dt, 2) / 2.0;
     if constexpr(Is + 1 != sizeof...(Tp))
-        coordinates_equations<Is + 1>(q, v, a);
+    coordinates_equations<Is + 1>(q, v, a);
 }
 
 
@@ -584,7 +667,7 @@ template<size_t Is = 0, typename... Tp>
 void velocities_equations (std::tuple<Tp...>& v, std::tuple<Tp...>& a_current, std::tuple<Tp...>& a_next) {
     std::get<Is>(v) += (std::get<Is>(a_current) + std::get<Is>(a_next)) / 2.0 * dt;
     if constexpr(Is + 1 != sizeof...(Tp))
-        velocities_equations<Is + 1>(v, a_current, a_next);
+    velocities_equations<Is + 1>(v, a_current, a_next);
 }
 
 // Input: vectors coordinates and velocities. Output: vector of coordinates after one time-step.
@@ -598,11 +681,11 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
         coordinates_equations(q[i], v[i], a_current[i]);
         a_next = std::move(total_particle_acceleration(q));
         vector_creation(a_current[i], a_next[i], a[i]);
-//        std::string name = "a";
-//        name = PATH + name;
+        //        std::string name = "a";
+        //        name = PATH + name;
         double t = dt;
-//        data_files(name, a, t);
-      velocities_equations(v[i], a_current[i], a_next[i]);
+        //        data_files(name, a, t);
+        velocities_equations(v[i], a_current[i], a_next[i]);
     }
     if (flag) periodic_borders(q_previous, q);
     flag = true;
@@ -612,14 +695,20 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
 
 void Verlet_integration_debug (std::vector<coord>& q, std::vector<coord>& v, std::string& acceleration_files_name) {
     static std::vector<coord> a_current = std::move(total_particle_acceleration(q));
-    static std::vector<coord> q_current;
+    static std::vector<coord> q_current = q;
     double debug_t = 0;
     bool flag = false;
     data_files_debug(acceleration_files_name, a_current, debug_t, flag);
     static bool first_step = true;
     std::vector<coord> a_next;
-    for (int i = 0; i < N; ++i)
+    for (int i = 0; i < N; ++i) {
+
         coordinates_equations(q[i], v[i], a_current[i]);
+        double error = 1.0e-10;
+        //if (distance(q[i], q_current[i]) < error) std::cout << "Fuck!\n";
+        std::cout << distance(q[i], q_current[i]) << std::endl;
+    }
+    coord buf = q[0];
     if (!first_step) {
         a_next = std::move(total_particle_acceleration(q));
         periodic_borders(q_current, q);
@@ -627,8 +716,12 @@ void Verlet_integration_debug (std::vector<coord>& q, std::vector<coord>& v, std
             velocities_equations(v[i], a_current[i], a_next[i]);
         a_current = a_next;
     }
+    momentum_exchange(q, v);
+    //if (is_same(q_current, q))
+    //std::cout << is_same(q_current, q) << std::boolalpha<< std::endl;
+
     first_step = false;
-    q_current = q;
+
 }
 
 
@@ -674,42 +767,57 @@ void acceleration_projections (std::tuple<Tp...>& a, std::tuple<Tp...>& q1, std:
     double F = (distance <= R_max) ? single_force(std::get<Is>(q2)) / 2.0 : 0;
     std::get<Is>(a) += (std::isfinite(F) ? F/m : 0);
     if constexpr(Is + 1 != sizeof...(Tp))
-        acceleration_projections<Is + 1>(a, q1, q2, distance);
+    acceleration_projections<Is + 1>(a, q1, q2, distance);
 }
 
 
 /* Returns vector of accelerations for particles. It's the most time-consuming operation, so it computing in parallels
  * via omp.h. I don't know what more effective: using it in parallel or just using -O3 flag.
  * Input: vector of coordinates. */
+/*std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
+    std::vector<coord> accelerations;
+    for (int i = 0; i < particles.size(); ++i) {
+        for (int j = 0; j < particles.size(); ++j) {
+            if (i != j) {
+                double R_ij = 0;
+                coord second_particle = std::move(minimal_distance(particles[i], particles[j], R_ij));
+                acceleration_projections(a, particles[i], second_particle, R_ij);
+            }
+
+        }
+    }
+}*/
 std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
     std::vector<coord> acceleration;
 #pragma omp parallel
     {
         std::vector<coord> acceleration_private;
         double a_x, a_y, a_z, R_ij;
+        //coord a, second_particle;
 #pragma omp for nowait schedule(static)
-        for (int i = 0; i < N; ++i) {
-            a_x = a_y = a_z = 0;
-            coord a = std::make_tuple(0, 0, 0);
-            for (int j = 0; j < N; ++j)
-                if (i != j) {
-                    R_ij = 0; // Distance between two interaction particles. ATTENTION: takes on values in
-                              // coord minimal_distance (coord& q1, coord& q2, double& R_ij) via reference!
-                    coord second_particle = std::move(minimal_distance(particles[i], particles[j], R_ij));
-                    acceleration_projections(a, particles[i], second_particle, R_ij);
-                    //a_x += single_force(std::get<0>(particles[i]) - std::get<0>(particles[j])) / m;
-                    //a_y += single_force(std::get<1>(particles[i]) - std::get<1>(particles[j])) / m;
-                    //a_z += single_force(std::get<2>(particles[i]) - std::get<2>(particles[j])) / m;
-                }
-            acceleration_private.emplace_back(a);
-            //acceleration_private.emplace_back(std::make_tuple(a_x, a_y, a_z));
+for (int i = 0; i < N; ++i) {
+    a_x = a_y = a_z = 0;
+    coord a = std::make_tuple(0, 0, 0);
+    for (int j = 0; j < N; ++j) {
+        if (i != j) {
+            R_ij = 0; // Distance between two interaction particles. ATTENTION: takes on values in
+            // coord minimal_distance (coord& q1, coord& q2, double& R_ij) via reference!
+            coord second_particle = std::move(minimal_distance(particles[i], particles[j], R_ij));
+            acceleration_projections(a, particles[i], second_particle, R_ij);
+            //a_x += single_force(std::get<0>(particles[i]) - std::get<0>(particles[j])) / m;
+            //a_y += single_force(std::get<1>(particles[i]) - std::get<1>(particles[j])) / m;
+            //a_z += single_force(std::get<2>(particles[i]) - std::get<2>(particles[j])) / m;
         }
 
+        acceleration_private.emplace_back(a);
+    }    //acceleration_private.emplace_back(std::make_tuple(a_x, a_y, a_z));
+}
+
 #pragma omp for schedule(static) ordered
-        for (int i = 0; i < omp_get_num_threads(); ++i) {
+for (int i = 0; i < omp_get_num_threads(); ++i) {
 #pragma omp ordered
-            acceleration.insert(acceleration.end(), acceleration_private.begin(), acceleration_private.end());
-        }
+    acceleration.insert(acceleration.end(), acceleration_private.begin(), acceleration_private.end());
+}
     }
     return acceleration;
 }
