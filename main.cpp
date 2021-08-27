@@ -20,36 +20,36 @@ const double k_B = 1.380649e-16; // Boltzmann constant, erg/K
 // Substance characteristics
 const std::string substance = "Ar";
 const double m = 6.6335e-23;  // Argon mass, g
-const double eps = 119.8;  // Potential pit depth (Theta/k_B), K
-const double Theta = k_B * eps;  // Equilibrium temperature
-const double sigma = 3.405e-8;  // Smth like shielding length, cm
-const double R_0 = sigma * std::pow(2.0, 1.0/6.0);
+const double eps = 119.8; // Potential pit depth (Theta/k_B), K
+const double Theta = k_B * eps;
+const double sigma = 3.405e-8; // Zero potential.
+const double R_0 = sigma * std::pow(2.0, 1.0/6.0); // Minimum potential
 const double R_Ar = 1.54e-8;
 
 
 // Gas characteristics
 const double P = 1.0e6;
-const double T = 300; // Temperature, K
+const double T = 130.0; // Temperature, K
 const double n = P / k_B / T; // Concentration, 1/cm^-3
 const double V_init = std::sqrt(3.0 * k_B * T / m); // rms speed corresponding to a given temperature (T), cm/c
 
 
 // Program constants
 const int N = 1e2; //Number of particles
-const double dt = 1.0e-10; // Time-step
+const double dt = 1.0e-10; // Time-step, c
 const double simulation_time = 7e-8;
-const double R_max = 2.0*R_0;
+const double R_cutoff = 2.0 * R_0;
 const double error = 1.0e-10;
 
 
 // Model constants
-const double Volume = N/n;
+const double Volume = N/n; // n corresponds to a unit volume
 const double characteristic_size = std::pow(Volume, 1.0/3.0);
 const double left_border = -characteristic_size / 2.0;
 const double right_border = characteristic_size / 2.0;
 
 
-typedef std::tuple<double, double, double> coord;
+typedef std::tuple<double, double, double> coord; // Contains coordinates as (x, y, z)
 
 
 std::vector<coord> neighboring_cubes; // Contains coordinates of centers virtual areas
@@ -86,10 +86,11 @@ void frames (std::string& name, int& step);
 
 
 int main () {
+    // Just ancillary code for define directories with files,
     std::string trajectory_files_path = std::move(exec("rm -rf trajectories && mkdir trajectories && cd trajectories && echo $PWD"));
     std::string trajectory_files_name = trajectory_files_path + '/' + substance + "_coordinates";
 
-
+    // Initials.
     std::vector<coord> coordinates = std::move(initial_coordinates());
     std::vector<coord> velocities = std::move(initial_velocities());
     neighboring_cubes = std::move(areas_centers(characteristic_size));
@@ -117,6 +118,18 @@ bool is_equal (double a, double b) {
     return std::fabs(a - b) < std::numeric_limits<double>::epsilon();
 }
 
+template<typename T, size_t... Is>
+bool equal_tuples_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::index_sequence<Is...>) {
+    return ((is_equal(std::get<Is>(t), std::get<Is>(t1))) & ...);
+}
+
+// Returns true if two tuples (t, t1) contains the same numbers.
+template <class Tuple>
+bool equal_tuples (const Tuple& t, const Tuple& t1) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return equal_tuples_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
+}
+
 
 // It returns true if distance between two doubles less than comparison_error.
 bool is_equal (double a, double b, double comparison_error) {
@@ -129,6 +142,7 @@ double distance_impl (T const& t, T const& t1, std::index_sequence<Is...>, std::
     return (std::sqrt((std::pow(std::get<Is>(t) - std::get<Is>(t1), 2) + ...)));
 }
 
+// Returns the distance between two points.
 template <class Tuple>
 double distance (const Tuple& t, const Tuple& t1) {
     constexpr auto size = std::tuple_size<Tuple>{};
@@ -136,7 +150,7 @@ double distance (const Tuple& t, const Tuple& t1) {
 }
 
 
-// result is a vector whose begin is point a and end is point b.
+// result is a vector (coord) whose begin is point a and end is point b.
 template<size_t Is = 0, typename... Tp>
 void vector_creation (std::tuple<Tp...>& a, std::tuple<Tp...>& b, std::tuple<Tp...>& result) {
     std::get<Is>(result) = std::get<Is>(b) - std::get<Is>(a);
@@ -155,10 +169,10 @@ void vector_offset (std::tuple<Tp...>& vector, std::tuple<Tp...>& frame_of_refer
 
 
 template<size_t Is = 0, typename... Tp>
-void product_of_vector_and_constant (std::tuple<Tp...>& vector, double lambda, std::tuple<Tp...>& result) {
+void vector_scalar_multiplication (std::tuple<Tp...>& vector, double lambda, std::tuple<Tp...>& result) {
     std::get<Is>(result) = std::get<Is>(vector) * lambda;
     if constexpr(Is + 1 != sizeof...(Tp))
-        product_of_vector_and_constant<Is + 1>(vector, lambda, result);
+        vector_scalar_multiplication<Is + 1>(vector, lambda, result);
 }
 
 
@@ -182,7 +196,7 @@ std::string toString (T val) {
     return oss.str();
 }
 
-
+// Filling tuple (coordinate) with random doubles in range from left to right.
 template<size_t Is = 0, typename... Tp>
 void random_tuple (std::tuple<Tp...>& coordinate, double left, double right) {
     std::uniform_real_distribution<> dis(left, right);
@@ -192,18 +206,31 @@ void random_tuple (std::tuple<Tp...>& coordinate, double left, double right) {
 }
 
 
+bool good_distance (coord& particle, std::vector<coord>& particles) {
+    bool ans = true;
+    for (auto & i : particles) {
+        ans &= (distance(particle, i) >= R_cutoff);
+    }
+    return ans;
+}
+
+
 // Returns initial coordinates of particles evenly distributed over the volume.
 std::vector<coord> initial_coordinates () {
     std::vector<coord> coordinates;
     coord coordinate;
-    for (int i = 0; i < N; ++i) {
-        random_tuple(coordinate, left_border, right_border);
-        coordinates.emplace_back(std::move(coordinate));
+    coordinates.emplace_back(std::make_tuple(0, 0, 0));
+    for (int i = 1; i < N; ++i) {
+        do {
+            random_tuple(coordinate, left_border, right_border);
+        } while (!good_distance(coordinate, coordinates));
+        coordinates.emplace_back(coordinate);
     }
     return coordinates;
 }
 
 
+// Returns uniform distributed in direction velocities with same absolute values.
 std::vector<coord> initial_velocities () {
     std::vector<coord> velocities;
     coord direction;
@@ -220,16 +247,16 @@ std::vector<coord> initial_velocities () {
             cos_psi = a / std::sqrt(d);
             cos_gamma = std::sqrt(1.0 - (std::pow(mu, 2.0) + std::pow(cos_psi, 2.0))) *
                         ((dis(gen) > 0.5) ? 1.0 : (-1.0));
-        } while (std::pow(mu, 2) + std::pow(cos_psi, 2) > 1);
+        } while (std::pow(mu, 2) + std::pow(cos_psi, 2) >= 1.0);
         coord velocity_direction = std::make_tuple(cos_psi, mu, cos_gamma);
-        product_of_vector_and_constant(velocity_direction, V_init, velocity_direction);
+        vector_scalar_multiplication(velocity_direction, V_init, velocity_direction);
         velocities.emplace_back(std::move(velocity_direction));
     }
     return velocities;
 }
 
 
-// Returns the std::vector of coordinates of main area's images.
+// Returns the coordinates of main area's images.
 std::vector<coord> areas_centers (double a) {
     std::vector<std::tuple<double, double, double>> centers;
     for (int k = 0; k < 3; ++k)
@@ -240,6 +267,7 @@ std::vector<coord> areas_centers (double a) {
 }
 
 
+// Defines the closest particle image in all related regions.
 coord closest_particle_image (coord& q1, coord& q2, double& R_ij) {
     double test;
     R_ij = 1.0e300;
@@ -256,6 +284,7 @@ coord closest_particle_image (coord& q1, coord& q2, double& R_ij) {
 }
 
 
+// Force of two-particles interaction via LJ-potential.
 double single_force (double R) {
     return 24.0 * Theta / R * (2.0 * std::pow(sigma / R, 12.0) - std::pow(sigma / R, 6.0));
 }
@@ -263,13 +292,14 @@ double single_force (double R) {
 
 template<size_t Is = 0, typename... Tp>
 void acceleration_projections (std::tuple<Tp...>& a, std::tuple<Tp...>& q1, std::tuple<Tp...>& q2, double& R_ij) {
-    double F = (R_ij <= R_max && R_ij >= 2.0*R_Ar) ? single_force(std::get<Is>(q2) - std::get<Is>(q1)) : 0;
+    double F = (R_ij <= R_cutoff && R_ij > 2.0*R_Ar) ? single_force(std::fabs(std::get<Is>(q1) - std::get<Is>(q2))) : 0;
     std::get<Is>(a) += (std::isfinite(F) ? F/m : 0);
     if constexpr(Is + 1 != sizeof...(Tp))
         acceleration_projections<Is + 1>(a, q1, q2, R_ij);
 }
 
 
+// Will be rewrited with OMP.
 std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
     std::vector<coord> a (N);
     for (int i = 0; i < N; ++i) {
@@ -281,6 +311,23 @@ std::vector<coord> total_particle_acceleration (std::vector<coord>& particles) {
             }
     }
     return a;
+}
+
+
+double border_intersection_count (double& coordinate) {
+    double count;
+    modf(std::fabs(coordinate/right_border), &count);
+    return count;
+}
+
+
+template<size_t Is = 0, typename... Tp>
+void periodic_boundary_conditions (std::tuple<Tp...>& q) {
+    double intersected_borders = border_intersection_count(std::get<Is>(q));
+    if (std::get<Is>(q) < left_border) std::get<Is>(q) += intersected_borders * right_border;
+    if (std::get<Is>(q) >= right_border) std::get<Is>(q) += intersected_borders * left_border;
+    if constexpr(Is + 1 != sizeof...(Tp))
+        periodic_boundary_conditions<Is + 1>(q);
 }
 
 
@@ -302,32 +349,30 @@ void velocities_equations (std::tuple<Tp...>& v, std::tuple<Tp...>& a_current, s
 }
 
 
-template<size_t Is = 0, typename... Tp>
-void periodic_boundary_conditions (std::tuple<Tp...>& q) {
-    if (std::get<Is>(q) < left_border) std::get<Is>(q) += right_border;
-    if (std::get<Is>(q) >= right_border) std::get<Is>(q) += left_border;
-    if constexpr(Is + 1 != sizeof...(Tp))
-        periodic_boundary_conditions<Is + 1>(q);
-}
-
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     static bool first_step = true;
     static std::vector<coord> a_current;
+
     if (first_step) a_current = std::move(total_particle_acceleration(q));
 
+    std::vector<coord> q_current (N);
     std::vector<int> outsiders;
     std::vector<coord> a_next;
 
     // Definition of coordination on next time step:
     for (int i = 0; i < N; ++i) {
         coordinates_equations(q[i], v[i], a_current[i]);
+        q_current[i] = q[i];
         periodic_boundary_conditions(q[i]);
-        outsiders.emplace_back(i);
+        if (!equal_tuples(q_current[i], q[i]))
+            outsiders.emplace_back(i);
+        else
+            std::cout << "Yeach!\n";
     }
 
     // Definition next time step velocities:
     if (!first_step) {
-        a_next = std::move(total_particle_acceleration(q));
+        a_next = std::move(total_particle_acceleration(q_current));
         for (int i = 0; i < N; ++i)
             for (int & outsider : outsiders) {
                 if (i == outsider)
@@ -412,7 +457,7 @@ void frames (std::string& name, int& step) {
         FILE *gp = popen("gnuplot  -persist", "w");
         if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
         std::vector<std::string> stuff = {"set term jpeg size 700, 700",
-                                          "set output \'" + name + toString(i) + "\'.jpg",
+                                          "set output \'" + name + toString(i) + ".jpg\'",
                                           "set grid xtics ytics ztics",
                                           "set xrange " + range,
                                           "set yrange " + range,
@@ -420,7 +465,7 @@ void frames (std::string& name, int& step) {
                                           "set key off",
                                           "set ticslevel 0",
                                           "set border 4095",
-                                          "splot \'" + name + "." + toString(i) + "\' using 1:2:3 pt 7", "e"};
+                                          "splot \'" + name + "." + toString(i) + "\' using 1:2:3 pt 7"};
         for (const auto& it : stuff)
             fprintf(gp, "%s\n", it.c_str());
         pclose(gp);
