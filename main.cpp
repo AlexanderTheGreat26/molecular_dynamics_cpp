@@ -48,7 +48,7 @@ const double V_init = std::sqrt(3.0 * k_B * T / m); // rms speed corresponding t
 // Program constants
 const int N = 1e2; //Number of particles
 const double dt = 1.0e-10; // Time-step
-const double simulation_time = 7e-9;
+const double simulation_time = 7e-7;
 const double R_max = 2.0*R_0;
 const double error = 1.0e-10;
 
@@ -83,10 +83,9 @@ void data_files (std::string& name, std::vector<coord>& data, double& t);
 
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
 
-void gif_creation (std::string name, int& steps);
+double kinetic_energy (std::vector<coord>& velocities);
 
-
-void data_file_for_vmd (std::vector<coord> data);
+bool is_equal (double a, double b);
 
 
 int main () {
@@ -98,15 +97,16 @@ int main () {
     std::vector<coord> velocities = std::move(initial_velocities());
     neighboring_cubes = std::move(areas_centers(characteristic_size));
 
+    double E_precious, E_current = kinetic_energy(velocities);
     double t = 0;
-    int step = 0;
     do {
+        E_precious = E_current;
         data_files(trajectory_files_name, coordinates, t);
         Verlet_integration(coordinates, velocities);
         t += dt;
-        ++step;
-    } while (t < simulation_time);
-    gif_creation(trajectory_files_name, step);
+        E_current = kinetic_energy(velocities);
+    } while (t < simulation_time && is_equal(E_precious, E_current));
+
     return 0;
 }
 
@@ -159,6 +159,18 @@ void product_of_vector_and_constant (std::tuple<Tp...>& vector, double lambda, s
     std::get<Is>(result) = std::get<Is>(vector) * lambda;
     if constexpr(Is + 1 != sizeof...(Tp))
         product_of_vector_and_constant<Is + 1>(vector, lambda, result);
+}
+
+
+template<typename T, size_t... Is>
+double scalar_product_impl (T const& t1, std::index_sequence<Is...>, T const& t2, std::index_sequence<Is...>) {
+    return ((std::get<Is>(t1)*std::get<Is>(t2)) + ...);
+}
+
+template <class Tuple>
+double scalar_product (const Tuple& t1, const Tuple& t2) {
+    constexpr auto size = std::tuple_size<Tuple>{};
+    return scalar_product_impl(t1, std::make_index_sequence<size>{}, t2, std::make_index_sequence<size>{});
 }
 
 
@@ -224,7 +236,7 @@ std::vector<coord> areas_centers (double a) {
         for (int j = 0; j < 3; ++j)
             for (int i = 0; i < 3; ++i)
                 centers.emplace_back(std::make_tuple(-a + i*a, -a + j*a, -a + k*a));
-            return centers;
+    return centers;
 }
 
 
@@ -369,26 +381,9 @@ void data_files (std::string& name, std::vector<coord>& data, double& t) {
     flag = true;
 }
 
-
-void gif_creation (std::string name, int& steps) {
-    exec("rm " + name + ".gif");
-    std::string range = '[' + toString(left_border) + ':' + toString(right_border) + ']';
-    FILE *gp = popen("gnuplot  -persist", "w");
-    if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
-    std::vector<std::string> stuff = {"set term gif animate delay 100",
-                                      "set output \'" + name + ".gif",
-                                      "set grid xtics ytics ztics",
-                                      "set xrange " + range,
-                                      "set yrange " + range,
-                                      "set zrange " + range,
-                                      "set key off",
-                                      "set ticslevel 0",
-                                      "set border 4095",
-                                      "do for [i=0:" + toString(steps-1) + "] {",
-                                      "do for [j=0:" + toString(N-1) + "] {",
-                                      "splot \'" + name + ".\'.j u 1:2:3 index i pt 7,",
-                                      "}\n}"};
-    for (const auto & it : stuff)
-        fprintf(gp, "%s\n", it.c_str());
-    pclose(gp);
+double kinetic_energy (std::vector<coord>& velocities) {
+    double sum = 0;
+    for (auto & velocity : velocities)
+        sum += m / 2.0 * scalar_product(velocity, velocity);
+    return sum;
 }
