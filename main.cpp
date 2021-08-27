@@ -1,14 +1,3 @@
-/* Program of 3d-modeling gas behavior in unit volume via molecular dynamics method.
- * Interaction of particles modeling via Lennard-Jones potential.
- * Coordinates and velocities defines via Verlet integration.
- * Initial coordinates and velocities directions distributed evenly.
- * By vector in comments it should be understood std::vector<std::tuple<>>,
- * by coordinates, velocities and accelerations it should be understood std::tuple contains projections on coordinate
- * axes.
- * Graphics realised via gnuplot.
- */
-
-
 #include <iostream>
 #include <cmath>
 #include <random>
@@ -48,7 +37,7 @@ const double V_init = std::sqrt(3.0 * k_B * T / m); // rms speed corresponding t
 // Program constants
 const int N = 1e2; //Number of particles
 const double dt = 1.0e-10; // Time-step
-const double simulation_time = 7e-7;
+const double simulation_time = 7e-8;
 const double R_max = 2.0*R_0;
 const double error = 1.0e-10;
 
@@ -87,6 +76,14 @@ double kinetic_energy (std::vector<coord>& velocities);
 
 bool is_equal (double a, double b);
 
+void gif_creation (std::string& name);
+
+void data_file (std::string& name, std::vector<coord>& data);
+
+void data_file (std::string& name, std::vector<coord>& data, int& step);
+
+void frames (std::string& name, int& step);
+
 
 int main () {
     std::string trajectory_files_path = std::move(exec("rm -rf trajectories && mkdir trajectories && cd trajectories && echo $PWD"));
@@ -99,14 +96,17 @@ int main () {
 
     double E_precious, E_current = kinetic_energy(velocities);
     double t = 0;
+    int step = 0;
     do {
         E_precious = E_current;
-        data_files(trajectory_files_name, coordinates, t);
+        data_file(trajectory_files_name, coordinates, step);
         Verlet_integration(coordinates, velocities);
         t += dt;
         E_current = kinetic_energy(velocities);
+        ++step;
     } while (t < simulation_time && is_equal(E_precious, E_current));
-
+    frames(trajectory_files_name, step);
+    //gif_creation(trajectory_files_name);
     return 0;
 }
 
@@ -219,7 +219,7 @@ std::vector<coord> initial_velocities () {
             } while (d > 1);
             cos_psi = a / std::sqrt(d);
             cos_gamma = std::sqrt(1.0 - (std::pow(mu, 2.0) + std::pow(cos_psi, 2.0))) *
-                    ((dis(gen) > 0.5) ? 1.0 : (-1.0));
+                        ((dis(gen) > 0.5) ? 1.0 : (-1.0));
         } while (std::pow(mu, 2) + std::pow(cos_psi, 2) > 1);
         coord velocity_direction = std::make_tuple(cos_psi, mu, cos_gamma);
         product_of_vector_and_constant(velocity_direction, V_init, velocity_direction);
@@ -317,7 +317,6 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
 
     std::vector<int> outsiders;
     std::vector<coord> a_next;
-    std::vector<coord> q_current = q;
 
     // Definition of coordination on next time step:
     for (int i = 0; i < N; ++i) {
@@ -381,9 +380,49 @@ void data_files (std::string& name, std::vector<coord>& data, double& t) {
     flag = true;
 }
 
+
 double kinetic_energy (std::vector<coord>& velocities) {
     double sum = 0;
     for (auto & velocity : velocities)
         sum += m / 2.0 * scalar_product(velocity, velocity);
     return sum;
+}
+
+
+void data_file (std::string& name, std::vector<coord>& data) {
+    std::ofstream fout;
+    fout.open(name + ".txt", std::ios::app);
+    for (auto & i : data)
+        fout << tuple_to_string(i) << std::endl;
+    fout.close();
+}
+
+void data_file (std::string& name, std::vector<coord>& data, int& step) {
+    std::ofstream fout;
+    fout.open(name + '.' + toString(step), std::ios::app);
+    for (auto & i : data)
+        fout << tuple_to_string(i) << std::endl;
+    fout.close();
+}
+
+
+void frames (std::string& name, int& step) {
+    std::string range = "[" + toString(left_border) + ":" + toString(right_border) + "]";
+    for (int i = 0; i < step-1; ++i) {
+        FILE *gp = popen("gnuplot  -persist", "w");
+        if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
+        std::vector<std::string> stuff = {"set term jpeg size 700, 700",
+                                          "set output \'" + name + toString(i) + "\'.jpg",
+                                          "set grid xtics ytics ztics",
+                                          "set xrange " + range,
+                                          "set yrange " + range,
+                                          "set zrange " + range,
+                                          "set key off",
+                                          "set ticslevel 0",
+                                          "set border 4095",
+                                          "splot \'" + name + "." + toString(i) + "\' using 1:2:3 pt 7", "e"};
+        for (const auto& it : stuff)
+            fprintf(gp, "%s\n", it.c_str());
+        pclose(gp);
+    }
 }
