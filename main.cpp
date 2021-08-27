@@ -48,7 +48,7 @@ const double V_init = std::sqrt(3.0 * k_B * T / m); // rms speed corresponding t
 // Program constants
 const int N = 1e2; //Number of particles
 const double dt = 1.0e-10; // Time-step
-const double simulation_time = 7e-7;
+const double simulation_time = 7e-9;
 const double R_max = 2.0*R_0;
 const double error = 1.0e-10;
 
@@ -83,7 +83,10 @@ void data_files (std::string& name, std::vector<coord>& data, double& t);
 
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
 
-void gif_creation (std::string name, double min, double max, int number_of_points, int& steps);
+void gif_creation (std::string name, int& steps);
+
+
+void data_file_for_vmd (std::vector<coord> data);
 
 
 int main () {
@@ -96,12 +99,14 @@ int main () {
     neighboring_cubes = std::move(areas_centers(characteristic_size));
 
     double t = 0;
+    int step = 0;
     do {
         data_files(trajectory_files_name, coordinates, t);
         Verlet_integration(coordinates, velocities);
         t += dt;
+        ++step;
     } while (t < simulation_time);
-
+    gif_creation(trajectory_files_name, step);
     return 0;
 }
 
@@ -314,9 +319,9 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
         a_next = std::move(total_particle_acceleration(q));
         for (int i = 0; i < N; ++i)
             for (int & outsider : outsiders) {
-                if (i == outsider) {
+                if (i == outsider)
                     ++i;
-                } else
+                else
                     velocities_equations(v[i], a_current[i], a_next[i]);
             }
         a_current = a_next;
@@ -364,20 +369,25 @@ void data_files (std::string& name, std::vector<coord>& data, double& t) {
     flag = true;
 }
 
-void gif_creation (std::string name) {
+
+void gif_creation (std::string name, int& steps) {
+    exec("rm " + name + ".gif");
     std::string range = '[' + toString(left_border) + ':' + toString(right_border) + ']';
     FILE *gp = popen("gnuplot  -persist", "w");
     if (!gp) throw std::runtime_error("Error opening pipe to GNUplot.");
-    std::vector<std::string> stuff = {"set term gif animate",
+    std::vector<std::string> stuff = {"set term gif animate delay 100",
                                       "set output \'" + name + ".gif",
-                                      "set multiplot",
                                       "set grid xtics ytics ztics",
                                       "set xrange " + range,
                                       "set yrange " + range,
                                       "set zrange " + range,
                                       "set key off",
                                       "set ticslevel 0",
-                                      "set border 4095"};
+                                      "set border 4095",
+                                      "do for [i=0:" + toString(steps-1) + "] {",
+                                      "do for [j=0:" + toString(N-1) + "] {",
+                                      "splot \'" + name + ".\'.j u 1:2:3 index i pt 7,",
+                                      "}\n}"};
     for (const auto & it : stuff)
         fprintf(gp, "%s\n", it.c_str());
     pclose(gp);
