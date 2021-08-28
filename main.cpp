@@ -172,6 +172,7 @@ std::string toString (T val) {
     return oss.str();
 }
 
+
 // Filling tuple (coordinate) with random doubles in range from left to right.
 template<size_t Is = 0, typename... Tp>
 void random_tuple (std::tuple<Tp...>& coordinate, double left, double right) {
@@ -346,12 +347,11 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
     if (!first_step) {
         a_next = std::move(total_particle_acceleration(q_current));
         for (int i = 0; i < N; ++i)
-            for (int & outsider : outsiders) {
+            for (int & outsider : outsiders)
                 if (i == outsider)
                     ++i;
                 else
                     velocities_equations(v[i], a_current[i], a_next[i]);
-            }
         a_current = a_next;
     }
     first_step = false;
