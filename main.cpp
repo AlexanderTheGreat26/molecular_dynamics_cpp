@@ -29,7 +29,7 @@ const double R_Ar = 1.54e-8;
 
 // Gas characteristics
 const double P = 1.0e6;
-const double T = 130.0; // Temperature, K
+const double T = 160.0; // Temperature, K
 const double n = P / k_B / T; // Concentration, 1/cm^-3
 const double V_init = std::sqrt(3.0 * k_B * T / m); // rms speed corresponding to a given temperature (T), cm/c
 
@@ -39,7 +39,6 @@ const int N = 1e2; //Number of particles
 const double dt = 1.0e-10; // Time-step, c
 const double simulation_time = 7e-8;
 const double R_cutoff = 2.0 * R_0;
-const double error = 1.0e-10;
 
 
 // Model constants
@@ -66,19 +65,11 @@ std::vector<coord> initial_coordinates ();
 
 std::vector<coord> initial_velocities ();
 
-std::string exec (std::string str);
-
-void data_files (std::string& name, std::vector<coord>& data, double& t);
+std::string exec (const std::string &str);
 
 void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v);
 
-double kinetic_energy (std::vector<coord>& velocities);
-
 bool is_equal (double a, double b);
-
-void gif_creation (std::string& name);
-
-void data_file (std::string& name, std::vector<coord>& data);
 
 void data_file (std::string& name, std::vector<coord>& data, int& step);
 
@@ -89,25 +80,28 @@ int main () {
     // Just ancillary code for define directories with files,
     std::string trajectory_files_path = std::move(exec("rm -rf trajectories && mkdir trajectories && cd trajectories && echo $PWD"));
     std::string trajectory_files_name = trajectory_files_path + '/' + substance + "_coordinates";
+    std::string velocities_files_path = std::move(exec("rm -rf velocities && mkdir velocities && cd velocities && echo $PWD"));
+    std::string velocities_files_name = velocities_files_path + '/' + substance + "_velocities";
+
 
     // Initials.
     std::vector<coord> coordinates = std::move(initial_coordinates());
     std::vector<coord> velocities = std::move(initial_velocities());
     neighboring_cubes = std::move(areas_centers(characteristic_size));
 
-    double E_precious, E_current = kinetic_energy(velocities);
     double t = 0;
     int step = 0;
     do {
-        E_precious = E_current;
         data_file(trajectory_files_name, coordinates, step);
+        data_file(velocities_files_name, coordinates, step);
         Verlet_integration(coordinates, velocities);
         t += dt;
-        E_current = kinetic_energy(velocities);
         ++step;
-    } while (t < simulation_time && is_equal(E_precious, E_current));
+    } while (t < simulation_time);
     frames(trajectory_files_name, step);
-    //gif_creation(trajectory_files_name);
+
+    // exec ("cd " + trajectory_files_path + "&& convert *.jpg out.gif"); // Creates gif... very slow.
+
     return 0;
 }
 
@@ -128,12 +122,6 @@ template <class Tuple>
 bool equal_tuples (const Tuple& t, const Tuple& t1) {
     constexpr auto size = std::tuple_size<Tuple>{};
     return equal_tuples_impl(t, t1, std::make_index_sequence<size>{}, std::make_index_sequence<size>{});
-}
-
-
-// It returns true if distance between two doubles less than comparison_error.
-bool is_equal (double a, double b, double comparison_error) {
-    return std::fabs(a - b) < comparison_error;
 }
 
 
@@ -176,18 +164,6 @@ void vector_scalar_multiplication (std::tuple<Tp...>& vector, double lambda, std
 }
 
 
-template<typename T, size_t... Is>
-double scalar_product_impl (T const& t1, std::index_sequence<Is...>, T const& t2, std::index_sequence<Is...>) {
-    return ((std::get<Is>(t1)*std::get<Is>(t2)) + ...);
-}
-
-template <class Tuple>
-double scalar_product (const Tuple& t1, const Tuple& t2) {
-    constexpr auto size = std::tuple_size<Tuple>{};
-    return scalar_product_impl(t1, std::make_index_sequence<size>{}, t2, std::make_index_sequence<size>{});
-}
-
-
 // std::to_string not safe enough. It will be used everywhere instead of std::to_string.
 template <typename T>
 std::string toString (T val) {
@@ -208,9 +184,8 @@ void random_tuple (std::tuple<Tp...>& coordinate, double left, double right) {
 
 bool good_distance (coord& particle, std::vector<coord>& particles) {
     bool ans = true;
-    for (auto & i : particles) {
+    for (auto & i : particles)
         ans &= (distance(particle, i) >= R_cutoff);
-    }
     return ans;
 }
 
@@ -364,10 +339,7 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
         coordinates_equations(q[i], v[i], a_current[i]);
         q_current[i] = q[i];
         periodic_boundary_conditions(q[i]);
-        if (!equal_tuples(q_current[i], q[i]))
-            outsiders.emplace_back(i);
-        else
-            std::cout << "Yeach!\n";
+        if (!equal_tuples(q_current[i], q[i])) outsiders.emplace_back(i);
     }
 
     // Definition next time step velocities:
@@ -387,7 +359,7 @@ void Verlet_integration (std::vector<coord>& q, std::vector<coord>& v) {
 
 
 //The function returns the terminal ans. Input - string for term.
-std::string exec (std::string str) {
+std::string exec (const std::string& str) {
     const char* cmd = str.c_str();
     std::array<char, 128> buffer;
     std::string result;
@@ -412,35 +384,6 @@ std::string tuple_to_string (const Tuple& t) {
     return tuple_to_string_impl(t, std::make_index_sequence<size>{});
 }
 
-
-void data_files (std::string& name, std::vector<coord>& data, double& t) {
-    static bool flag = false;
-    for (int i = 0; i < data.size(); ++i) {
-        std::ofstream fout;
-        fout.open(name + '.' + toString(i), std::ios::app);
-        std::string buf = std::move(tuple_to_string(data[i]));
-        fout << buf << t << ((flag) ? "\n\n\n\n" + buf + "\n" : "\n");
-        fout.close();
-    }
-    flag = true;
-}
-
-
-double kinetic_energy (std::vector<coord>& velocities) {
-    double sum = 0;
-    for (auto & velocity : velocities)
-        sum += m / 2.0 * scalar_product(velocity, velocity);
-    return sum;
-}
-
-
-void data_file (std::string& name, std::vector<coord>& data) {
-    std::ofstream fout;
-    fout.open(name + ".txt", std::ios::app);
-    for (auto & i : data)
-        fout << tuple_to_string(i) << std::endl;
-    fout.close();
-}
 
 void data_file (std::string& name, std::vector<coord>& data, int& step) {
     std::ofstream fout;
