@@ -93,7 +93,7 @@ int main () {
     int step = 0;
     do {
         data_file(trajectory_files_name, coordinates, step);
-        data_file(velocities_files_name, coordinates, step);
+        data_file(velocities_files_name, velocities, step);
         Verlet_integration(coordinates, velocities);
         t += dt;
         ++step;
