@@ -24,7 +24,7 @@ const double eps = 119.8; // Potential pit depth (Theta/k_B), K
 const double Theta = k_B * eps;
 const double sigma = 3.405e-8; // Zero potential.
 const double R_0 = sigma * std::pow(2.0, 1.0/6.0); // Minimum potential
-const double R_Ar = 1.54e-8;
+const double R_Ar = 1.88e-8;
 
 
 // Gas characteristics
