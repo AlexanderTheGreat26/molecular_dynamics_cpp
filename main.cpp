@@ -186,7 +186,7 @@ void random_tuple (std::tuple<Tp...>& coordinate, double left, double right) {
 bool good_distance (coord& particle, std::vector<coord>& particles) {
     bool ans = true;
     for (auto & i : particles)
-        ans &= (distance(particle, i) >= R_cutoff);
+        ans &= (distance(particle, i) >= R_0);
     return ans;
 }
 
